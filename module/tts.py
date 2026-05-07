@@ -262,19 +262,14 @@ def _generate_speech_google_cloud(text, output_path):
         raise RuntimeError(error_msg) from e
 
 
-def generate_speech(text, output_path):
+def generate_speech(text, output_path, voice_method=None):
     """
     Generate speech from text using multiple TTS services with fallback to gTTS.
-
-    Tries TTS services in order:
-    1. ElevenLabs (voice cloning)
-    2. Coqui TTS
-    3. Google Cloud TTS
-    4. gTTS (final fallback)
 
     Args:
         text (str): Text to convert to speech
         output_path (str): Full path where to save the audio file
+        voice_method (str|None): Preferred voice method such as 'elevenlabs', 'coqui', or 'google'.
 
     Returns:
         str: Path to the generated audio file
@@ -299,13 +294,31 @@ def generate_speech(text, output_path):
 
     print(f"🎵 Generating speech for text: '{text[:50]}...'")
 
-    # List of TTS functions to try in order
-    tts_methods = [
-        ("ElevenLabs", _generate_speech_elevenlabs),
-        ("Coqui TTS", _generate_speech_coqui),
-        ("Google Cloud TTS", _generate_speech_google_cloud),
-        ("gTTS", _generate_speech_gtts),
-    ]
+    if voice_method == 'coqui':
+        tts_methods = [
+            ("Coqui TTS", _generate_speech_coqui),
+            ("gTTS", _generate_speech_gtts),
+        ]
+    elif voice_method == 'google':
+        tts_methods = [
+            ("Google Cloud TTS", _generate_speech_google_cloud),
+            ("Coqui TTS", _generate_speech_coqui),
+            ("gTTS", _generate_speech_gtts),
+        ]
+    elif voice_method == 'elevenlabs':
+        tts_methods = [
+            ("ElevenLabs", _generate_speech_elevenlabs),
+            ("Coqui TTS", _generate_speech_coqui),
+            ("Google Cloud TTS", _generate_speech_google_cloud),
+            ("gTTS", _generate_speech_gtts),
+        ]
+    else:
+        tts_methods = [
+            ("ElevenLabs", _generate_speech_elevenlabs),
+            ("Coqui TTS", _generate_speech_coqui),
+            ("Google Cloud TTS", _generate_speech_google_cloud),
+            ("gTTS", _generate_speech_gtts),
+        ]
 
     last_error = None
 

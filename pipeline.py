@@ -21,9 +21,10 @@ from module.tts import generate_speech
 class AudioTranslationPipeline:
     """High-level pipeline to transcribe, translate, and synthesize audio."""
 
-    def __init__(self, src_lang: str = "es", tgt_lang: str = "en"):
+    def __init__(self, src_lang: str = "es", tgt_lang: str = "en", voice_method: str | None = None):
         self.src_lang = src_lang
         self.tgt_lang = tgt_lang
+        self.voice_method = voice_method
 
     def transcribe(self, audio_path: str) -> List[dict]:
         """Transcribe audio into timestamped text segments."""
@@ -35,7 +36,7 @@ class AudioTranslationPipeline:
 
     def synthesize(self, text: str, output_path: str) -> str:
         """Synthesize translated text into an audio file."""
-        return generate_speech(text, output_path)
+        return generate_speech(text, output_path, voice_method=self.voice_method)
 
     def run(
         self,

@@ -48,75 +48,73 @@ document.addEventListener('DOMContentLoaded', function() {
     // Reset button
     resetBtn.addEventListener('click', resetForm);
 
-    function startDubbing() {
-        // Show progress section
+    async function startDubbing() {
         form.style.display = 'none';
         progressSection.style.display = 'block';
-
-        // Disable start button
         startBtn.disabled = true;
         startBtn.textContent = 'Processing...';
+        progressFill.style.width = '10%';
+        progressText.textContent = 'Uploading file...';
+        logOutput.textContent = '';
 
-        // Simulate progress (in real implementation, this would connect to backend)
-        simulateProgress();
-    }
+        const requestData = new FormData(form);
 
-    function simulateProgress() {
-        const steps = [
-            '🎬 Initializing pipeline...',
-            '🔊 Audio enhancement...',
-            '🎤 Transcribing audio...',
-            '🌍 Translating text...',
-            '🎙️ Generating speech...',
-            '🎬 Processing video...',
-            '✅ Finalizing...'
-        ];
+        try {
+            const response = await fetch('/api/dub', {
+                method: 'POST',
+                body: requestData,
+            });
 
-        let currentStep = 0;
-        const totalSteps = steps.length;
-
-        const interval = setInterval(() => {
-            if (currentStep < totalSteps) {
-                const progress = ((currentStep + 1) / totalSteps) * 100;
-                progressFill.style.width = progress + '%';
-                progressText.textContent = steps[currentStep];
-
-                // Add to log
-                logOutput.textContent += `[${new Date().toLocaleTimeString()}] ${steps[currentStep]}\n`;
-                logOutput.scrollTop = logOutput.scrollHeight;
-
-                currentStep++;
-            } else {
-                clearInterval(interval);
-                showResults();
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => null);
+                throw new Error(errorData?.error || 'Server error while dubbing audio.');
             }
-        }, 2000); // 2 seconds per step
+
+            progressFill.style.width = '60%';
+            progressText.textContent = 'Processing audio on server...';
+            logOutput.textContent += `[${new Date().toLocaleTimeString()}] Upload complete, waiting for server response...\n`;
+
+            const result = await response.json();
+            progressFill.style.width = '100%';
+            progressText.textContent = 'Finalizing output...';
+            logOutput.textContent += `[${new Date().toLocaleTimeString()}] Processing complete.\n`;
+
+            showResults(result);
+        } catch (error) {
+            progressText.textContent = 'Error';
+            progressFill.style.width = '100%';
+            logOutput.textContent += `[${new Date().toLocaleTimeString()}] ${error.message}\n`;
+            alert(error.message);
+            startBtn.disabled = false;
+            startBtn.textContent = '🚀 Start Dubbing';
+            form.style.display = 'block';
+            progressSection.style.display = 'none';
+        }
     }
 
-    function showResults() {
+    function showResults(result) {
         progressSection.style.display = 'none';
         resultsSection.style.display = 'block';
 
-        // In a real implementation, these would be actual file URLs from the backend
-        // For demo purposes, we'll show placeholder content
         const audioPlayer = document.getElementById('audioPlayer');
-        const videoPlayer = document.getElementById('videoPlayer');
+        const audioDownload = document.getElementById('audioDownload');
+        const translatedText = document.getElementById('translatedText');
         const videoResult = document.getElementById('videoResult');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const videoDownload = document.getElementById('videoDownload');
 
-        // Check if input was video
-        const inputFile = fileInput.files[0];
-        const isVideo = inputFile.type.startsWith('video/');
+        audioPlayer.src = result.audioUrl;
+        audioDownload.href = result.audioUrl;
 
-        if (isVideo) {
+        translatedText.textContent = result.translatedText || 'No translated text available.';
+
+        if (result.isVideo && result.videoUrl) {
             videoResult.style.display = 'block';
-            // videoPlayer.src = 'path/to/dubbed/video.mp4';
-            // document.getElementById('videoDownload').href = 'path/to/dubbed/video.mp4';
+            videoPlayer.src = result.videoUrl;
+            videoDownload.href = result.videoUrl;
         } else {
             videoResult.style.display = 'none';
         }
-
-        // audioPlayer.src = 'path/to/dubbed/audio.wav';
-        // document.getElementById('audioDownload').href = 'path/to/dubbed/audio.wav';
     }
 
     function resetForm() {

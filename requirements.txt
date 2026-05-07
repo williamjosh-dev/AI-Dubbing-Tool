@@ -1,0 +1,7 @@
+Flask>=2.0
+python-dotenv>=1.0
+faster-whisper
+deep-translator
+gtts
+google-cloud-texttospeech
+elevenlabs
