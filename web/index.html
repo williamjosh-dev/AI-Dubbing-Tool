@@ -1,0 +1,135 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dubbing MVP - Language Translation & Voice Cloning</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎬 Dubbing MVP</h1>
+            <p>Convert Spanish audio/video to English with professional voice cloning</p>
+        </header>
+
+        <main>
+            <form id="dubbingForm" enctype="multipart/form-data">
+                <div class="upload-section">
+                    <div class="file-upload">
+                        <label for="audioFile">
+                            <div class="upload-area">
+                                <div class="upload-icon">📁</div>
+                                <div class="upload-text">
+                                    <strong>Drop your audio/video file here</strong><br>
+                                    or click to browse (MP3, WAV, MP4 supported)
+                                </div>
+                            </div>
+                        </label>
+                        <input type="file" id="audioFile" name="audioFile" accept=".mp3,.wav,.mp4,.avi,.mov" required>
+                    </div>
+                    <div id="fileInfo" class="file-info" style="display: none;">
+                        <span id="fileName"></span>
+                        <span id="fileSize"></span>
+                    </div>
+                </div>
+
+                <div class="options-section">
+                    <h3>🎛️ Enhancement Options</h3>
+
+                    <div class="option-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="enhance" id="enhance">
+                            <span class="checkmark"></span>
+                            <div class="option-info">
+                                <strong>🔊 Audio Enhancement</strong>
+                                <small>Denoise, EQ, and normalize audio quality</small>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="option-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="voiceClone" id="voiceClone">
+                            <span class="checkmark"></span>
+                            <div class="option-info">
+                                <strong>🎙️ Voice Cloning</strong>
+                                <small>Match the original speaker's voice style</small>
+                            </div>
+                        </label>
+
+                        <div id="voiceOptions" class="voice-options" style="display: none;">
+                            <select name="voiceMethod" id="voiceMethod">
+                                <option value="elevenlabs">ElevenLabs (Cloud, Premium)</option>
+                                <option value="coqui">Coqui TTS (Local, Free)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="option-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="lipsync" id="lipsync">
+                            <span class="checkmark"></span>
+                            <div class="option-info">
+                                <strong>🎬 Lip Sync</strong>
+                                <small>Adjust timing for video dubbing (requires video input)</small>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="option-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="verbose" id="verbose" checked>
+                            <span class="checkmark"></span>
+                            <div class="option-info">
+                                <strong>📊 Verbose Output</strong>
+                                <small>Show detailed progress and logs</small>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="action-section">
+                    <button type="submit" id="startBtn" class="btn btn-primary">
+                        🚀 Start Dubbing
+                    </button>
+                    <button type="button" id="resetBtn" class="btn btn-secondary">
+                        🔄 Reset
+                    </button>
+                </div>
+            </form>
+
+            <div id="progressSection" class="progress-section" style="display: none;">
+                <h3>⚡ Processing...</h3>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div id="progressText" class="progress-text">Initializing...</div>
+                <div id="logOutput" class="log-output"></div>
+            </div>
+
+            <div id="resultsSection" class="results-section" style="display: none;">
+                <h3>✅ Complete!</h3>
+                <div class="result-files">
+                    <div class="result-item">
+                        <h4>🎵 Dubbed Audio</h4>
+                        <audio id="audioPlayer" controls></audio>
+                        <a id="audioDownload" href="#" download class="btn btn-success">📥 Download Audio</a>
+                    </div>
+                    <div class="result-item" id="videoResult" style="display: none;">
+                        <h4>🎬 Dubbed Video</h4>
+                        <video id="videoPlayer" controls></video>
+                        <a id="videoDownload" href="#" download class="btn btn-success">📥 Download Video</a>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>Built with ❤️ for seamless language dubbing</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
