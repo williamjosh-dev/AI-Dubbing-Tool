@@ -1,61 +1,94 @@
-﻿// Simple JavaScript for Dubbing MVP UI
-document.addEventListener('DOMContentLoaded', function() {
-    // DOM elements
+// Advanced JavaScript for AI Dubbing Studio
+window.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('dubbingForm');
     const fileInput = document.getElementById('audioFile');
     const fileInfo = document.getElementById('fileInfo');
     const fileName = document.getElementById('fileName');
     const fileSize = document.getElementById('fileSize');
     const voiceClone = document.getElementById('voiceClone');
-    const voiceOptions = document.getElementById('voiceOptions');
+    const voiceMethod = document.getElementById('voiceMethod');
     const startBtn = document.getElementById('startBtn');
     const resetBtn = document.getElementById('resetBtn');
     const progressSection = document.getElementById('progressSection');
     const progressFill = document.getElementById('progressFill');
+
+    voiceMethod.disabled = true;
+    voiceMethod.parentElement.style.opacity = '0.65';
+    const progressPercent = document.getElementById('progressPercent');
     const progressText = document.getElementById('progressText');
     const logOutput = document.getElementById('logOutput');
     const resultsSection = document.getElementById('resultsSection');
+    const videoResult = document.getElementById('videoResult');
+    const translatedText = document.getElementById('translatedText');
+    const resultDetails = document.getElementById('resultDetails');
+    const dropzone = document.getElementById('dropzone');
 
-    // File upload handling
-    fileInput.addEventListener('change', function(e) {
-        const file = e.target.files[0];
+    const audioPlayer = document.getElementById('audioPlayer');
+    const audioDownload = document.getElementById('audioDownload');
+    const videoPlayer = document.getElementById('videoPlayer');
+    const videoDownload = document.getElementById('videoDownload');
+
+    fileInput.addEventListener('change', ({ target }) => {
+        const file = target.files[0];
         if (file) {
             fileName.textContent = file.name;
             fileSize.textContent = formatFileSize(file.size);
-            fileInfo.style.display = 'block';
+            fileInfo.hidden = false;
         } else {
-            fileInfo.style.display = 'none';
+            fileInfo.hidden = true;
         }
     });
 
-    // Voice clone options toggle
-    voiceClone.addEventListener('change', function() {
-        voiceOptions.style.display = this.checked ? 'block' : 'none';
+    voiceClone.addEventListener('change', () => {
+        const voiceMethod = document.getElementById('voiceMethod');
+        voiceMethod.disabled = !voiceClone.checked;
+        voiceMethod.parentElement.style.opacity = voiceClone.checked ? '1' : '0.65';
     });
 
-    // Form submission
-    form.addEventListener('submit', function(e) {
-        e.preventDefault();
-
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
         if (!fileInput.files[0]) {
-            alert('Please select a file to dub.');
+            window.alert('Select a valid audio or video file first.');
             return;
         }
-
-        startDubbing();
+        await startDubbing();
     });
 
-    // Reset button
     resetBtn.addEventListener('click', resetForm);
 
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((eventName) => {
+        dropzone.addEventListener(eventName, preventDefaults, false);
+    });
+
+    ['dragenter', 'dragover'].forEach((eventName) => {
+        dropzone.addEventListener(eventName, () => dropzone.classList.add('dragover'), false);
+    });
+
+    ['dragleave', 'drop'].forEach((eventName) => {
+        dropzone.addEventListener(eventName, () => dropzone.classList.remove('dragover'), false);
+    });
+
+    dropzone.addEventListener('drop', handleDrop, false);
+
+    function preventDefaults(event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    function handleDrop(event) {
+        const files = event.dataTransfer.files;
+        if (files.length > 0) {
+            fileInput.files = files;
+            fileInput.dispatchEvent(new Event('change'));
+        }
+    }
+
     async function startDubbing() {
-        form.style.display = 'none';
-        progressSection.style.display = 'block';
-        startBtn.disabled = true;
-        startBtn.textContent = 'Processing...';
-        progressFill.style.width = '10%';
-        progressText.textContent = 'Uploading file...';
-        logOutput.textContent = '';
+        form.querySelectorAll('button').forEach((button) => button.setAttribute('disabled', 'true'));
+        resultsSection.hidden = true;
+        progressSection.hidden = false;
+        updateProgress(10, 'Uploading file to server...');
+        logOutput.textContent = 'Uploading source file...\n';
 
         const requestData = new FormData(form);
 
@@ -66,116 +99,89 @@ document.addEventListener('DOMContentLoaded', function() {
             });
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => null);
-                throw new Error(errorData?.error || 'Server error while dubbing audio.');
+                const errorPayload = await response.json().catch(() => null);
+                throw new Error(errorPayload?.error || 'Server failed to process the request.');
             }
 
-            progressFill.style.width = '60%';
-            progressText.textContent = 'Processing audio on server...';
-            logOutput.textContent += `[${new Date().toLocaleTimeString()}] Upload complete, waiting for server response...\n`;
+            updateProgress(40, 'Server is processing transcription and translation...');
+            logOutput.textContent += 'Server accepted file. Processing pipeline...\n';
 
             const result = await response.json();
-            progressFill.style.width = '100%';
-            progressText.textContent = 'Finalizing output...';
-            logOutput.textContent += `[${new Date().toLocaleTimeString()}] Processing complete.\n`;
 
-            showResults(result);
+            updateProgress(85, 'Finalizing generated output...');
+            logOutput.textContent += 'Pipeline completed. Preparing results...\n';
+
+            renderResults(result);
+            updateProgress(100, 'Complete!');
         } catch (error) {
-            progressText.textContent = 'Error';
-            progressFill.style.width = '100%';
-            logOutput.textContent += `[${new Date().toLocaleTimeString()}] ${error.message}\n`;
-            alert(error.message);
-            startBtn.disabled = false;
-            startBtn.textContent = '🚀 Start Dubbing';
-            form.style.display = 'block';
-            progressSection.style.display = 'none';
+            updateProgress(100, 'Error occurred');
+            logOutput.textContent += `Error: ${error.message}\n`;
+            window.alert(error.message);
+            progressSection.hidden = true;
+        } finally {
+            form.querySelectorAll('button').forEach((button) => button.removeAttribute('disabled'));
         }
     }
 
-    function showResults(result) {
-        progressSection.style.display = 'none';
-        resultsSection.style.display = 'block';
-
-        const audioPlayer = document.getElementById('audioPlayer');
-        const audioDownload = document.getElementById('audioDownload');
-        const translatedText = document.getElementById('translatedText');
-        const videoResult = document.getElementById('videoResult');
-        const videoPlayer = document.getElementById('videoPlayer');
-        const videoDownload = document.getElementById('videoDownload');
+    function renderResults(result) {
+        progressSection.hidden = true;
+        resultsSection.hidden = false;
 
         audioPlayer.src = result.audioUrl;
         audioDownload.href = result.audioUrl;
 
-        translatedText.textContent = result.translatedText || 'No translated text available.';
+        translatedText.textContent = result.translatedText || 'No translated transcript available.';
 
-        if (result.isVideo && result.videoUrl) {
-            videoResult.style.display = 'block';
+        if (result.videoUrl) {
+            videoResult.hidden = false;
             videoPlayer.src = result.videoUrl;
             videoDownload.href = result.videoUrl;
         } else {
-            videoResult.style.display = 'none';
+            videoResult.hidden = true;
+            videoPlayer.src = '';
         }
+
+        const details = [
+            { label: 'Source file', value: result.sourceFile || 'Unknown' },
+            { label: 'Source language', value: result.sourceLang || 'auto' },
+            { label: 'Target language', value: result.targetLang || 'auto' },
+            { label: 'TTS engine', value: result.voiceMethod || 'Auto' },
+            { label: 'Voice cloning', value: result.voiceClone ? 'Enabled' : 'Disabled' },
+            { label: 'Audio enhancement', value: result.enhanceAudio ? 'Enabled' : 'Disabled' },
+            { label: 'Video output', value: result.videoUrl ? 'Generated' : 'Audio only' },
+        ];
+
+        resultDetails.innerHTML = details.map((item) => `
+            <div class="meta-item">
+                <strong>${item.label}</strong>
+                <span>${item.value}</span>
+            </div>
+        `).join('');
+    }
+
+    function updateProgress(value, label) {
+        progressFill.style.width = `${value}%`;
+        progressPercent.textContent = `${value}%`;
+        progressText.textContent = label;
     }
 
     function resetForm() {
         form.reset();
-        form.style.display = 'block';
-        progressSection.style.display = 'none';
-        resultsSection.style.display = 'none';
-        fileInfo.style.display = 'none';
-        voiceOptions.style.display = 'none';
-        startBtn.disabled = false;
-        startBtn.textContent = '🚀 Start Dubbing';
+        fileInfo.hidden = true;
+        resultsSection.hidden = true;
+        progressSection.hidden = true;
         progressFill.style.width = '0%';
-        progressText.textContent = 'Initializing...';
+        progressPercent.textContent = '0%';
+        progressText.textContent = 'Waiting for upload...';
         logOutput.textContent = '';
+        audioPlayer.src = '';
+        videoPlayer.src = '';
     }
 
     function formatFileSize(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    }
-
-    // Drag and drop functionality
-    const uploadArea = document.querySelector('.upload-area');
-
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-        uploadArea.addEventListener(eventName, preventDefaults, false);
-    });
-
-    function preventDefaults(e) {
-        e.preventDefault();
-        e.stopPropagation();
-    }
-
-    ['dragenter', 'dragover'].forEach(eventName => {
-        uploadArea.addEventListener(eventName, highlight, false);
-    });
-
-    ['dragleave', 'drop'].forEach(eventName => {
-        uploadArea.addEventListener(eventName, unhighlight, false);
-    });
-
-    function highlight(e) {
-        uploadArea.classList.add('highlight');
-    }
-
-    function unhighlight(e) {
-        uploadArea.classList.remove('highlight');
-    }
-
-    uploadArea.addEventListener('drop', handleDrop, false);
-
-    function handleDrop(e) {
-        const dt = e.dataTransfer;
-        const files = dt.files;
-
-        if (files.length > 0) {
-            fileInput.files = files;
-            fileInput.dispatchEvent(new Event('change'));
-        }
+        if (!bytes) return '0 Bytes';
+        const units = ['Bytes', 'KB', 'MB', 'GB'];
+        const index = Math.floor(Math.log(bytes) / Math.log(1024));
+        return `${(bytes / Math.pow(1024, index)).toFixed(2)} ${units[index]}`;
     }
 });
