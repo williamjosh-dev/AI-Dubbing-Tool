@@ -1,136 +1,181 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dubbing MVP - Language Translation & Voice Cloning</title>
+    <title>AI Dubbing Studio</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🎬 Dubbing MVP</h1>
-            <p>Convert Spanish audio/video to English with professional voice cloning</p>
+    <div class="app-shell">
+        <header class="topbar">
+            <div class="topbar-brand">
+                <span class="brand-mark">AI</span>
+                <div>
+                    <h1>AI Dubbing Studio</h1>
+                    <p>Professional multilingual dubbing for audio and video with voice enhancement and seamless output generation.</p>
+                </div>
+            </div>
+            <div class="topbar-actions">
+                <span class="badge">v1.0</span>
+            </div>
         </header>
 
-        <main>
-            <form id="dubbingForm" enctype="multipart/form-data">
-                <div class="upload-section">
-                    <div class="file-upload">
-                        <label for="audioFile">
-                            <div class="upload-area">
-                                <div class="upload-icon">📁</div>
-                                <div class="upload-text">
-                                    <strong>Drop your audio/video file here</strong><br>
-                                    or click to browse (MP3, WAV, MP4 supported)
-                                </div>
-                            </div>
-                        </label>
-                        <input type="file" id="audioFile" name="audioFile" accept=".mp3,.wav,.mp4,.avi,.mov" required>
-                    </div>
-                    <div id="fileInfo" class="file-info" style="display: none;">
-                        <span id="fileName"></span>
-                        <span id="fileSize"></span>
-                    </div>
+        <main class="workspace">
+            <section class="panel panel-config">
+                <div class="panel-heading">
+                    <span class="eyebrow">Upload & configure</span>
+                    <h2>Source file and dubbing options</h2>
                 </div>
 
-                <div class="options-section">
-                    <h3>🎛️ Enhancement Options</h3>
+                <form id="dubbingForm" enctype="multipart/form-data" class="form-grid">
+                    <label class="dropzone" id="dropzone" for="audioFile">
+                        <div class="dropzone-icon">📁</div>
+                        <div>
+                            <h3>Upload audio or video</h3>
+                            <p>Drag and drop your file or click to browse. Supported formats: MP3, WAV, MP4, MOV, AVI, MKV.</p>
+                        </div>
+                        <input type="file" id="audioFile" name="audioFile" accept=".mp3,.wav,.ogg,.flac,.m4a,.mp4,.mov,.avi,.mkv,.webm" required>
+                    </label>
 
-                    <div class="option-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" name="enhance" id="enhance">
-                            <span class="checkmark"></span>
-                            <div class="option-info">
-                                <strong>🔊 Audio Enhancement</strong>
-                                <small>Denoise, EQ, and normalize audio quality</small>
-                            </div>
-                        </label>
+                    <div class="file-details" id="fileInfo" hidden>
+                        <div><strong>File:</strong> <span id="fileName"></span></div>
+                        <div><strong>Size:</strong> <span id="fileSize"></span></div>
                     </div>
 
-                    <div class="option-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" name="voiceClone" id="voiceClone">
-                            <span class="checkmark"></span>
-                            <div class="option-info">
-                                <strong>🎙️ Voice Cloning</strong>
-                                <small>Match the original speaker's voice style</small>
-                            </div>
-                        </label>
-
-                        <div id="voiceOptions" class="voice-options" style="display: none;">
-                            <select name="voiceMethod" id="voiceMethod">
-                                <option value="elevenlabs">ElevenLabs (Cloud, Premium)</option>
-                                <option value="coqui">Coqui TTS (Local, Free)</option>
+                    <div class="field-row">
+                        <div class="field-card">
+                            <label for="srcLang">Source language</label>
+                            <select id="srcLang" name="srcLang">
+                                <option value="es" selected>Spanish</option>
+                                <option value="en">English</option>
+                                <option value="fr">French</option>
+                                <option value="de">German</option>
+                                <option value="pt">Portuguese</option>
+                                <option value="ja">Japanese</option>
+                                <option value="zh-cn">Chinese</option>
+                                <option value="ar">Arabic</option>
+                            </select>
+                        </div>
+                        <div class="field-card">
+                            <label for="tgtLang">Target language</label>
+                            <select id="tgtLang" name="tgtLang">
+                                <option value="en" selected>English</option>
+                                <option value="es">Spanish</option>
+                                <option value="fr">French</option>
+                                <option value="de">German</option>
+                                <option value="pt">Portuguese</option>
+                                <option value="ja">Japanese</option>
+                                <option value="zh-cn">Chinese</option>
+                                <option value="ar">Arabic</option>
                             </select>
                         </div>
                     </div>
 
-                    <div class="option-group">
-                        <label class="checkbox-label">
+                    <div class="field-row">
+                        <div class="field-card">
+                            <label for="outputFormat">Output format</label>
+                            <select id="outputFormat" name="outputFormat">
+                                <option value="wav">WAV</option>
+                                <option value="mp3">MP3</option>
+                            </select>
+                        </div>
+
+                        <div class="field-card">
+                            <label for="voiceMethod">Voice engine</label>
+                            <select id="voiceMethod" name="voiceMethod">
+                                <option value="auto">Automatic</option>
+                                <option value="elevenlabs">ElevenLabs</option>
+                                <option value="coqui">Coqui TTS</option>
+                                <option value="google">Google Cloud TTS</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="toggles-grid">
+                        <label class="toggle">
+                            <input type="checkbox" name="enhanceAudio" id="enhanceAudio">
+                            <span class="toggle-switch"></span>
+                            <div>
+                                <strong>Audio enhancement</strong>
+                                <p>Normalize, denoise, and optimize voice clarity.</p>
+                            </div>
+                        </label>
+
+                        <label class="toggle">
+                            <input type="checkbox" name="voiceClone" id="voiceClone">
+                            <span class="toggle-switch"></span>
+                            <div>
+                                <strong>Voice cloning</strong>
+                                <p>Preserve the speaker's voice style during synthesis.</p>
+                            </div>
+                        </label>
+
+                        <label class="toggle">
                             <input type="checkbox" name="lipsync" id="lipsync">
-                            <span class="checkmark"></span>
-                            <div class="option-info">
-                                <strong>🎬 Lip Sync</strong>
-                                <small>Adjust timing for video dubbing (requires video input)</small>
+                            <span class="toggle-switch"></span>
+                            <div>
+                                <strong>Video lip-sync</strong>
+                                <p>Replace audio track in your source video automatically.</p>
                             </div>
                         </label>
                     </div>
 
-                    <div class="option-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" name="verbose" id="verbose" checked>
-                            <span class="checkmark"></span>
-                            <div class="option-info">
-                                <strong>📊 Verbose Output</strong>
-                                <small>Show detailed progress and logs</small>
-                            </div>
-                        </label>
+                    <div class="actions-row">
+                        <button type="submit" id="startBtn" class="btn btn-primary">Start dubbing</button>
+                        <button type="button" id="resetBtn" class="btn btn-secondary">Reset form</button>
                     </div>
+                </form>
+
+                <section class="progress-panel" id="progressSection" hidden>
+                    <div class="progress-header">
+                        <div>
+                            <span class="eyebrow">Live status</span>
+                            <h3>Processing workflow</h3>
+                        </div>
+                        <span id="progressPercent">0%</span>
+                    </div>
+
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+
+                    <p class="progress-text" id="progressText">Waiting for upload...</p>
+                    <pre class="log-box" id="logOutput"></pre>
+                </section>
+            </section>
+
+            <section class="panel panel-results" id="resultsSection" hidden>
+                <div class="panel-heading">
+                    <span class="eyebrow">Output</span>
+                    <h2>Dubbed deliverables</h2>
                 </div>
 
-                <div class="action-section">
-                    <button type="submit" id="startBtn" class="btn btn-primary">
-                        🚀 Start Dubbing
-                    </button>
-                    <button type="button" id="resetBtn" class="btn btn-secondary">
-                        🔄 Reset
-                    </button>
-                </div>
-            </form>
-
-            <div id="progressSection" class="progress-section" style="display: none;">
-                <h3>⚡ Processing...</h3>
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progressFill"></div>
-                </div>
-                <div id="progressText" class="progress-text">Initializing...</div>
-                <div id="logOutput" class="log-output"></div>
-            </div>
-
-            <div id="resultsSection" class="results-section" style="display: none;">
-                <h3>✅ Complete!</h3>
-                <div class="result-files">
-                    <div class="result-item">
-                        <h4>🎵 Dubbed Audio</h4>
+                <div class="results-grid">
+                    <div class="result-card">
+                        <h3>Dubbed audio</h3>
                         <audio id="audioPlayer" controls></audio>
-                        <a id="audioDownload" href="#" download class="btn btn-success">📥 Download Audio</a>
+                        <a id="audioDownload" class="link-button" href="#" download>Download audio</a>
                     </div>
-                    <div class="result-item">
-                        <h4>📝 Translated Text</h4>
-                        <pre id="translatedText" class="translated-text"></pre>
+
+                    <div class="result-card">
+                        <h3>Translated transcript</h3>
+                        <pre id="translatedText" class="transcript"></pre>
                     </div>
-                    <div class="result-item" id="videoResult" style="display: none;">
-                        <h4>🎬 Dubbed Video</h4>
+
+                    <div class="result-card" id="videoResult" hidden>
+                        <h3>Dubbed video</h3>
                         <video id="videoPlayer" controls></video>
-                        <a id="videoDownload" href="#" download class="btn btn-success">📥 Download Video</a>
+                        <a id="videoDownload" class="link-button" href="#" download>Download video</a>
                     </div>
                 </div>
-            </div>
+
+                <div class="meta-grid" id="resultDetails"></div>
+            </section>
         </main>
 
-        <footer>
-            <p>Built with ❤️ for seamless language dubbing</p>
+        <footer class="footer-note">
+            <p>Designed for enterprise workflows with rich dubbing controls and optimized output.</p>
         </footer>
     </div>
 
