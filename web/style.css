@@ -84,8 +84,9 @@ textarea {
 
 .workspace {
   display: grid;
-  grid-template-columns: 1.2fr 0.95fr;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.95fr);
   gap: 24px;
+  width: 100%;
 }
 
 .panel {
@@ -352,7 +353,11 @@ select {
   background: rgba(11, 19, 33, 0.92);
   border: 1px solid rgba(148, 163, 184, 0.14);
   color: #dbeafe;
+
   overflow-x: auto;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .link-button {
@@ -390,6 +395,21 @@ select {
   color: #94a3b8;
 }
 
+audio,
+video {
+  width: 100%;
+  max-width: 100%;
+}
+
+img,
+iframe {
+  max-width: 100%;
+}
+.result-card,
+.panel,
+.panel-results {
+  min-width: 0;
+}
 @media (max-width: 1024px) {
   .workspace {
     grid-template-columns: 1fr;
