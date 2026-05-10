@@ -70,26 +70,13 @@ textarea {
   margin: 0;
   max-width: 680px;
   color: #cbd5e1;
+  font-size: 1rem;
+  line-height: 1.75;
 }
 
-.badge {
-  display: inline-flex;
-  padding: 10px 16px;
-  border-radius: 999px;
-  background: rgba(56, 189, 248, 0.15);
-  color: #dbeafe;
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-.workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.95fr);
-  gap: 24px;
-  width: 100%;
-}
-
-.panel {
+.card {
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 28px;
   background: rgba(11, 19, 33, 0.95);
   border: 1px solid rgba(148, 163, 184, 0.12);
@@ -347,20 +334,12 @@ select {
 
 .transcript {
   width: 100%;
-  min-height: 180px;
-  padding: 18px;
-  border-radius: 20px;
-  background: rgba(11, 19, 33, 0.92);
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  color: #dbeafe;
-
-  overflow-x: auto;
-  overflow-wrap: break-word;
-  word-break: break-word;
-  white-space: pre-wrap;
+  border-radius: 16px;
+  background: #020617;
 }
 
-.link-button {
+.audio-download {
+  margin-top: 14px;
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -395,36 +374,11 @@ select {
   color: #94a3b8;
 }
 
-audio,
-video {
-  width: 100%;
-  max-width: 100%;
-}
-
-img,
-iframe {
-  max-width: 100%;
-}
-.result-card,
-.panel,
-.panel-results {
-  min-width: 0;
-}
-@media (max-width: 1024px) {
-  .workspace {
-    grid-template-columns: 1fr;
-  }
-
-  .toggles-grid,
-  .field-row,
-  .meta-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 640px) {
-  .topbar {
-    flex-direction: column;
+@media (min-width: 920px) {
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1.25fr 0.85fr;
+    gap: 24px;
   }
 
   .dropzone {
