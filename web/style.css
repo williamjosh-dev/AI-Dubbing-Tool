@@ -352,7 +352,14 @@ select {
   background: rgba(11, 19, 33, 0.92);
   border: 1px solid rgba(148, 163, 184, 0.14);
   color: #dbeafe;
-  overflow-x: auto;
+  /* Make long transcripts wrap and scroll vertically instead of overflowing horizontally */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+  max-height: 360px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .link-button {
