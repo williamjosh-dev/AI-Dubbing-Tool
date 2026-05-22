@@ -70,25 +70,13 @@ textarea {
   margin: 0;
   max-width: 680px;
   color: #cbd5e1;
+  font-size: 1rem;
+  line-height: 1.75;
 }
 
-.badge {
-  display: inline-flex;
-  padding: 10px 16px;
-  border-radius: 999px;
-  background: rgba(56, 189, 248, 0.15);
-  color: #dbeafe;
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-.workspace {
-  display: grid;
-  grid-template-columns: 1.2fr 0.95fr;
-  gap: 24px;
-}
-
-.panel {
+.card {
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 28px;
   background: rgba(11, 19, 33, 0.95);
   border: 1px solid rgba(148, 163, 184, 0.12);
@@ -346,6 +334,7 @@ select {
 
 .transcript {
   width: 100%;
+<<<<<<< HEAD
   min-height: 180px;
   padding: 18px;
   border-radius: 20px;
@@ -360,9 +349,14 @@ select {
   max-height: 360px;
   overflow-y: auto;
   overflow-x: hidden;
+=======
+  border-radius: 16px;
+  background: #020617;
+>>>>>>> a1be33b980ae5f023c68831fb7b622f861e29d35
 }
 
-.link-button {
+.audio-download {
+  margin-top: 14px;
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -397,21 +391,11 @@ select {
   color: #94a3b8;
 }
 
-@media (max-width: 1024px) {
-  .workspace {
-    grid-template-columns: 1fr;
-  }
-
-  .toggles-grid,
-  .field-row,
-  .meta-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 640px) {
-  .topbar {
-    flex-direction: column;
+@media (min-width: 920px) {
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1.25fr 0.85fr;
+    gap: 24px;
   }
 
   .dropzone {
