@@ -398,6 +398,13 @@ select {
   color: #f8fafc;
 }
 
+.result-card video {
+  width: 100%;
+  max-height: 420px;
+  border-radius: 12px;
+  object-fit: contain;
+}
+
 .footer-note {
   margin-top: 34px;
   text-align: center;

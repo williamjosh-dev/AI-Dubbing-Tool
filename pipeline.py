@@ -53,27 +53,42 @@ class AudioTranslationPipeline:
         if not segments:
             raise RuntimeError("Transcription returned no segments.")
 
-        full_text = " ".join(segment["text"] for segment in segments)
-        translated_text = self.translate(full_text)
+        # Translate each segment individually to preserve natural breaks
+        translated_segments = []
+        for segment in segments:
+            seg_text = segment.get("text", "")
+            translated = self.translate(seg_text) if seg_text else ""
+            translated_segments.append({
+                "start": segment.get("start"),
+                "end": segment.get("end"),
+                "text": seg_text,
+                "translated": translated,
+            })
 
-        output_audio_path = self.synthesize(translated_text, output_audio_path)
+        # Text to pass to TTS should be contiguous conversational text
+        tts_text = " ".join(s["translated"] for s in translated_segments if s.get("translated"))
+
+        output_audio_path = self.synthesize(tts_text, output_audio_path)
+
 
         if transcript_path:
-            self._save_transcript(transcript_path, segments, translated_text)
+            # Save both original segments and per-segment translations
+            self._save_transcript(transcript_path, segments, translated_segments)
 
         if save_translated_text and transcript_path is None:
             translated_text_path = Path(output_audio_path).with_suffix(".txt")
-            self._write_file(translated_text_path, translated_text)
+            self._write_file(translated_text_path, tts_text)
 
         return {
             "input_audio": audio_path,
             "output_audio": output_audio_path,
-            "translated_text": translated_text,
+            "translated_text": tts_text,
+            "translated_segments": translated_segments,
             "segments": segments,
         }
 
-    def _save_transcript(self, transcript_path: str, segments: List[dict], translated_text: str) -> None:
-        """Save both original transcript segments and translated text."""
+    def _save_transcript(self, transcript_path: str, segments: List[dict], translated_segments: List[dict]) -> None:
+        """Save both original transcript segments and per-segment translated text."""
         transcript_dir = Path(transcript_path).parent
         transcript_dir.mkdir(parents=True, exist_ok=True)
 
@@ -81,8 +96,10 @@ class AudioTranslationPipeline:
             f.write("Original segments:\n")
             for segment in segments:
                 f.write(f"[{segment['start']:.2f} - {segment['end']:.2f}] {segment['text']}\n")
-            f.write("\nTranslated text:\n")
-            f.write(translated_text)
+
+            f.write("\nTranslated segments:\n")
+            for tseg in translated_segments:
+                f.write(f"[{tseg['start']:.2f} - {tseg['end']:.2f}] {tseg.get('translated','')}\n")
 
     @staticmethod
     def _write_file(path: Path, content: str) -> None:

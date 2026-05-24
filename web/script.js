@@ -130,7 +130,18 @@ window.addEventListener('DOMContentLoaded', () => {
         audioPlayer.src = result.audioUrl;
         audioDownload.href = result.audioUrl;
 
-        translatedText.textContent = result.translatedText || 'No translated transcript available.';
+        // Prefer per-segment translated text if available to preserve breaks
+        if (result.translatedSegments && result.translatedSegments.length) {
+            const lines = result.translatedSegments.map(s => {
+                const start = (typeof s.start === 'number') ? s.start.toFixed(2) : s.start;
+                const end = (typeof s.end === 'number') ? s.end.toFixed(2) : s.end;
+                const text = s.translated || s.text || '';
+                return `[${start} - ${end}] ${text}`;
+            });
+            translatedText.textContent = lines.join('\n');
+        } else {
+            translatedText.textContent = result.translatedText || 'No translated transcript available.';
+        }
 
         if (result.videoUrl) {
             videoResult.hidden = false;

@@ -176,6 +176,7 @@ def dub_audio():
         response = {
             "audioUrl": f"/outputs/{output_filename}",
             "translatedText": result.get("translated_text", ""),
+            "translatedSegments": result.get("translated_segments", []),
             "segments": result.get("segments", []),
             "isVideo": is_video_file(saved_filename),
             "sourceFile": filename,
