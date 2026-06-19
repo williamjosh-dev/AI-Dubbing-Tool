@@ -1075,4 +1075,10 @@ If you are iterating on this repository, keep the following in mind:
 - Validate UI changes across desktop and mobile widths
 - Test audio and video outputs manually after pipeline changes
 
+### 🤝 Connect With Me
+* **Discord (socials):** https://discord.com/william_josh_tech
+* **X (Twitter):** https://x.com/Josh_builds_itz
+
+*Open for remote deep-tech contract work, open-source collaborations, and developer grants.*
+
 Thank you for using AI Dubbing Studio.
