@@ -1,5 +1,9 @@
 # AI Dubbing Studio
 
+![AI Dubbing Studio](https://img.shields.io/badge/status-production-blue) 
+![Python](https://img.shields.io/badge/python-3.10%2B-blue) 
+![Flask](https://img.shields.io/badge/framework-flask-orange)
+
 Turn any video or audio file into a version people in another country can actually watch and understand — same content, different language, same feel.
 
 AI Dubbing Studio takes a source recording, transcribes what's being said, translates it, generates a new voice track, and (if the source was a video) drops that new audio back onto the original footage. What comes out the other end is a dubbed, downloadable file, ready to publish.
