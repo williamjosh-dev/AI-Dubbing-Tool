@@ -1,20 +1,22 @@
-#!/usr/bin/env python3
 import os
 import shutil
 import subprocess
 import uuid
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
-from flask import Flask, jsonify, request, send_from_directory
-from werkzeug.utils import secure_filename
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from pipeline import AudioTranslationPipeline
 
+# Configuration
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR = BASE_DIR / "outputs"
-WEB_DIR = BASE_DIR / "web"
 
 ALLOWED_EXTENSIONS = {
     "mp3", "wav", "ogg", "flac", "m4a",
@@ -25,25 +27,35 @@ OUTPUT_FORMATS = {"wav", "mp3"}
 DEFAULT_SRC_LANG = "es"
 DEFAULT_TGT_LANG = "en"
 
+# Initialization
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-app = Flask(__name__, static_folder=str(WEB_DIR), static_url_path="")
+app = FastAPI(title="AI Dubbing API")
 
+# CORS configuration for Next.js (usually runs on port 3000)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with specific origins like ["http://localhost:3000"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
+# Static file serving for outputs
+app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
+
+# Helper functions
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
-
 def is_video_file(filename: str) -> bool:
     return filename.rsplit(".", 1)[1].lower() in VIDEO_EXTENSIONS
-
 
 def run_ffmpeg(command: List[str]) -> None:
     completed = subprocess.run(command, capture_output=True, text=True)
     if completed.returncode != 0:
         raise RuntimeError(f"ffmpeg failed: {completed.stderr.strip()}")
-
 
 def extract_audio_from_video(video_path: Path, audio_path: Path) -> Path:
     if shutil.which("ffmpeg") is None:
@@ -64,12 +76,9 @@ def extract_audio_from_video(video_path: Path, audio_path: Path) -> Path:
         str(audio_path),
     ]
     run_ffmpeg(command)
-
     if not audio_path.exists() or audio_path.stat().st_size == 0:
         raise RuntimeError("Audio extraction produced no output")
-
     return audio_path
-
 
 def enhance_audio_file(input_path: Path, output_path: Path) -> Path:
     if shutil.which("ffmpeg") is None:
@@ -87,12 +96,9 @@ def enhance_audio_file(input_path: Path, output_path: Path) -> Path:
         str(output_path),
     ]
     run_ffmpeg(command)
-
     if not output_path.exists() or output_path.stat().st_size == 0:
         raise RuntimeError("Audio enhancement produced no output")
-
     return output_path
-
 
 def replace_audio_in_video(video_path: Path, audio_path: Path, output_video_path: Path) -> Path:
     if shutil.which("ffmpeg") is None:
@@ -118,45 +124,45 @@ def replace_audio_in_video(video_path: Path, audio_path: Path, output_video_path
         str(output_video_path),
     ]
     run_ffmpeg(command)
-
     if not output_video_path.exists() or output_video_path.stat().st_size == 0:
         raise RuntimeError("Dubbed video generation failed")
-
     return output_video_path
 
+# API Routes
+@app.get("/")
+def read_root():
+    return {"message": "AI Dubbing API is running. Visit /docs for documentation."}
 
-@app.route("/")
-def index():
-    return app.send_static_file("index.html")
+@app.post("/api/dub")
+def dub_audio(
+    audioFile: UploadFile = File(...),
+    srcLang: str = Form(DEFAULT_SRC_LANG),
+    tgtLang: str = Form(DEFAULT_TGT_LANG),
+    voiceClone: str = Form("off"),
+    voiceMethod: Optional[str] = Form(None),
+    outputFormat: str = Form("wav"),
+    enhanceAudio: str = Form("off")
+):
+    if not allowed_file(audioFile.filename):
+        raise HTTPException(status_code=400, detail="Unsupported file type.")
 
-
-@app.route("/api/dub", methods=["POST"])
-def dub_audio():
-    if "audioFile" not in request.files:
-        return jsonify({"error": "Missing audioFile field."}), 400
-
-    uploaded_file = request.files["audioFile"]
-    if uploaded_file.filename == "":
-        return jsonify({"error": "No file selected."}), 400
-
-    if not allowed_file(uploaded_file.filename):
-        return jsonify({"error": "Unsupported file type."}), 400
-
-    filename = secure_filename(uploaded_file.filename)
     session_id = uuid.uuid4().hex
+    filename = audioFile.filename
     saved_filename = f"{session_id}_{filename}"
     saved_path = UPLOAD_DIR / saved_filename
-    uploaded_file.save(saved_path)
 
-    src_lang = request.form.get("srcLang", DEFAULT_SRC_LANG)
-    tgt_lang = request.form.get("tgtLang", DEFAULT_TGT_LANG)
-    voice_clone = request.form.get("voiceClone") == "on"
-    voice_method = request.form.get("voiceMethod")
-    if voice_method == "auto":
+    with open(saved_path, "wb") as buffer:
+        shutil.copyfileobj(audioFile.file, buffer)
+
+    # Process parameters
+    is_voice_clone = voiceClone == "on"
+    if voiceMethod == "auto":
         voice_method = None
-    output_format = request.form.get("outputFormat", "wav").lower()
-    output_format = output_format if output_format in OUTPUT_FORMATS else "wav"
-    enhance_audio = request.form.get("enhanceAudio") == "on"
+    else:
+        voice_method = voiceMethod
+    
+    out_format = outputFormat.lower() if outputFormat.lower() in OUTPUT_FORMATS else "wav"
+    is_enhance = enhanceAudio == "on"
 
     try:
         if is_video_file(saved_filename):
@@ -164,13 +170,14 @@ def dub_audio():
         else:
             audio_source = saved_path
 
-        if enhance_audio:
+        if is_enhance:
             enhanced_audio = UPLOAD_DIR / f"{session_id}_enhanced.wav"
             audio_source = enhance_audio_file(audio_source, enhanced_audio)
 
-        pipeline = AudioTranslationPipeline(src_lang=src_lang, tgt_lang=tgt_lang, voice_method=voice_method)
-        output_filename = f"{session_id}_dubbed.{output_format}"
+        pipeline = AudioTranslationPipeline(src_lang=srcLang, tgt_lang=tgtLang, voice_method=voice_method)
+        output_filename = f"{session_id}_dubbed.{out_format}"
         output_path = OUTPUT_DIR / output_filename
+        
         result = pipeline.run(str(audio_source), str(output_path))
 
         response = {
@@ -180,11 +187,11 @@ def dub_audio():
             "segments": result.get("segments", []),
             "isVideo": is_video_file(saved_filename),
             "sourceFile": filename,
-            "sourceLang": src_lang,
-            "targetLang": tgt_lang,
-            "voiceClone": voice_clone,
+            "sourceLang": srcLang,
+            "targetLang": tgtLang,
+            "voiceClone": is_voice_clone,
             "voiceMethod": voice_method or "auto",
-            "enhanceAudio": enhance_audio,
+            "enhanceAudio": is_enhance,
         }
 
         if is_video_file(saved_filename):
@@ -193,16 +200,11 @@ def dub_audio():
             replace_audio_in_video(saved_path, output_path, dubbed_video_path)
             response["videoUrl"] = f"/outputs/{dubbed_video_filename}"
 
-        return jsonify(response)
+        return response
 
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
-
-
-@app.route("/outputs/<path:filename>")
-def serve_output(filename: str):
-    return send_from_directory(OUTPUT_DIR, filename)
-
+        raise HTTPException(status_code=500, detail=str(exc))
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=5000)
