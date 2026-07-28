@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -17,6 +17,7 @@ from pipeline import AudioTranslationPipeline
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR = BASE_DIR / "outputs"
+WEB_DIR = BASE_DIR / "web"
 
 ALLOWED_EXTENSIONS = {
     "mp3", "wav", "ogg", "flac", "m4a",
@@ -42,8 +43,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static file serving for outputs
+# --- Static File Serving ---
+# Mount outputs folder for target file playback
 app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
+
+# Mount web directory to serve frontend assets (css, js, images)
+app.mount("/web", StaticFiles(directory=str(WEB_DIR)), name="web")
 
 # Helper functions
 def allowed_file(filename: str) -> bool:
@@ -128,11 +133,16 @@ def replace_audio_in_video(video_path: Path, audio_path: Path, output_video_path
         raise RuntimeError("Dubbed video generation failed")
     return output_video_path
 
-# API Routes
-@app.get("/")
+# --- UI Route ---
+@app.get("/", response_class=HTMLResponse)
 def read_root():
-    return {"message": "AI Dubbing API is running. Visit /docs for documentation."}
+    index_html_path = WEB_DIR / "index.html"
+    if not index_html_path.exists():
+        raise HTTPException(status_code=404, detail="Frontend 'web/index.html' file missing from workspace repository folder.")
+    with open(index_html_path, "r", encoding="utf-8") as f:
+        return f.read()
 
+# --- API Routes ---
 @app.post("/api/dub")
 def dub_audio(
     audioFile: UploadFile = File(...),
