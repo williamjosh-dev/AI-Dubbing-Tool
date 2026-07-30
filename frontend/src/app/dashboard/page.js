@@ -10,7 +10,7 @@ const jobRows = [
 	{ name: 'product-demo.mov', status: 'Rendering', lang: 'de → en' },
 ];
 
-export default function DashboardPage() {
+export default function HomePage() {
 	return (
 		<section className="dashboard-grid dashboard-page">
 			<div className="panel-card hero-panel">
