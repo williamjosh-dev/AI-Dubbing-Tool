@@ -4,3 +4,4 @@ uploads/
 outputs/
 .env
 config/.env
+node_modules/
