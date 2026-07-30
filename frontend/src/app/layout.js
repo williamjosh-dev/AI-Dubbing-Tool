@@ -1,38 +1,22 @@
 import './global.css';
-import Link from 'next/link';
+import Sidebar from './components/sidebar';
 
 export const metadata = {
-	title: 'AI Dubbing Studio',
-	description: 'Route-based dubbing dashboard for uploads, jobs, and history.',
+  title: 'AI Dubbing Studio',
+  description: 'Route-based dubbing dashboard for uploads, jobs, and history.',
 };
 
 export default function RootLayout({ children }) {
-	return (
-		<html lang="en" suppressHydrationWarning>
-			<body>
-				<div className="app-shell">
-					<header className="topbar">
-						<div>
-							<p className="eyebrow">AI Dubbing Tool</p>
-							<h1 className="brand-title">Studio Dashboard</h1>
-						</div>
-
-						<nav className="topnav" aria-label="Primary navigation">
-							<Link href="/" className="topnav-link">
-								Home
-							</Link>
-							<Link href="/dashboard" className="topnav-link">
-								Dashboard
-							</Link>
-							<Link href="/history" className="topnav-link">
-								History
-							</Link>
-						</nav>
-					</header>
-
-					<main className="app-main">{children}</main>
-				</div>
-			</body>
-		</html>
-	);
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body className="bg-slate-50 text-slate-900 antialiased">
+        <div className="flex min-h-screen">
+          <Sidebar />
+          <div className="flex-1 lg:pl-64">
+            <main className="min-h-screen">{children}</main>
+          </div>
+        </div>
+      </body>
+    </html>
+  );
 }
