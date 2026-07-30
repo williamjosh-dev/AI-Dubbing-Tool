@@ -5,3 +5,4 @@ outputs/
 .env
 config/.env
 node_modules/
+.next/
