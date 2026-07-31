@@ -11,6 +11,7 @@ const pipelineCards = [
     detail: 'Files waiting to enter the pipeline',
     icon: Upload,
     trend: '+1 in the last 10 min',
+    accent: 'indigo',
   },
   {
     title: 'Active Model',
@@ -18,6 +19,7 @@ const pipelineCards = [
     detail: 'Transcription, translation & synthesis',
     icon: Cpu,
     trend: 'Stable · v2.3',
+    accent: 'emerald',
   },
   {
     title: 'Export Targets',
@@ -25,16 +27,33 @@ const pipelineCards = [
     detail: 'Default output for beta testing',
     icon: FileDown,
     trend: '2 formats available',
+    accent: 'amber',
   },
 ];
 
-const jobRows = [
-  { name: 'episode-12.mp4', status: 'Transcribing', lang: 'ES → EN', progress: 35 },
-  { name: 'tutorial-audio.wav', status: 'Translating', lang: 'FR → EN', progress: 62 },
-  { name: 'product-demo.mov', status: 'Rendering', lang: 'DE → EN', progress: 88 },
-];
+const cardAccentStyles = {
+  indigo: {
+    border: 'border-indigo-100',
+    iconBg: 'bg-indigo-50',
+    iconText: 'text-indigo-600',
+    trend: 'text-indigo-600',
+  },
+  emerald: {
+    border: 'border-emerald-100',
+    iconBg: 'bg-emerald-50',
+    iconText: 'text-emerald-600',
+    trend: 'text-emerald-600',
+  },
+  amber: {
+    border: 'border-amber-100',
+    iconBg: 'bg-amber-50',
+    iconText: 'text-amber-600',
+    trend: 'text-amber-600',
+  },
+};
 
 const statusStyles = {
+  Queued: 'bg-slate-100 text-slate-700 ring-slate-600/20',
   Transcribing: 'bg-amber-50 text-amber-700 ring-amber-600/20',
   Translating: 'bg-blue-50 text-blue-700 ring-blue-600/20',
   Rendering: 'bg-violet-50 text-violet-700 ring-violet-600/20',
@@ -42,56 +61,83 @@ const statusStyles = {
 
 export default function DashboardPage() {
   const [query, setQuery] = useState('');
-  const filteredJobs = jobRows.filter((job) =>
+  const [jobs, setJobs] = useState([]);
+
+  const filteredJobs = jobs.filter((job) =>
     job.name.toLowerCase().includes(query.toLowerCase())
   );
 
+  const handleNewUpload = () => {
+    const newJob = {
+      id: Date.now(),
+      name: `New upload ${jobs.length + 1}`,
+      status: 'Queued',
+      lang: 'EN → ES',
+      progress: 8,
+    };
+
+    setJobs((currentJobs) => [newJob, ...currentJobs]);
+  };
+
   return (
     <section className="mx-auto max-w-6xl px-6 py-10 space-y-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-sm font-medium text-indigo-600">Dashboard</p>
-          <h1 className="mt-1 text-2xl font-semibold text-slate-900">
-            Operational control for dubbing jobs
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Track pipeline progress, review job state, and keep the beta workflow organized.
-          </p>
+      <section className="overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 p-8 text-white shadow-sm">
+        <p className="text-sm font-medium text-indigo-200">Dashboard</p>
+        <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Keep your dubbing jobs organized</h1>
+        <p className="mt-3 max-w-2xl text-sm text-slate-300 sm:text-base">
+          Track progress, review job status, and stay on top of each upload from one place.
+        </p>
+
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={handleNewUpload}
+            className="inline-flex items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-slate-100"
+          >
+            <Upload className="h-4 w-4" />
+            New Upload
+          </button>
+          <Link
+            href="/history"
+            className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20"
+          >
+            View recent jobs
+            <Clock className="h-4 w-4" />
+          </Link>
         </div>
-        <Link
-          href="/"
-          className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
-        >
-          <Upload className="mr-2 h-4 w-4" />
-          New Upload
-        </Link>
-      </div>
+      </section>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {pipelineCards.map(({ title, value, detail, icon: Icon, trend }) => (
-          <article
-            key={title}
-            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:shadow-md"
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-slate-500">{title}</p>
-              <div className="rounded-lg bg-indigo-50 p-2">
-                <Icon className="h-4 w-4 text-indigo-600" />
+        {pipelineCards.map(({ title, value, detail, icon: Icon, trend, accent }) => {
+          const styles = cardAccentStyles[accent];
+
+          return (
+            <article
+              key={title}
+              className={`rounded-xl border bg-white p-5 shadow-sm transition hover:shadow-md ${styles.border}`}
+            >
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-500">{title}</p>
+                <div className={`rounded-lg p-2 ${styles.iconBg}`}>
+                  <Icon className={`h-4 w-4 ${styles.iconText}`} />
+                </div>
               </div>
-            </div>
-            <p className="mt-3 text-xl font-semibold text-slate-900">{value}</p>
-            <p className="mt-1 text-sm text-slate-500">{detail}</p>
-            <p className="mt-3 text-xs font-medium text-emerald-600">{trend}</p>
-          </article>
-        ))}
+              <p className="mt-3 text-xl font-semibold text-slate-900">{value}</p>
+              <p className="mt-1 text-sm text-slate-500">{detail}</p>
+              <p className={`mt-3 text-xs font-medium ${styles.trend}`}>{trend}</p>
+            </article>
+          );
+        })}
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="rounded-xl border border-indigo-100 bg-white shadow-[0_16px_40px_-24px_rgba(15,23,42,0.28)]">
         <div className="flex flex-col gap-3 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-indigo-600">Live Jobs</p>
+            <p className="text-sm font-medium text-indigo-600">Your Jobs</p>
             <h2 className="text-base font-semibold text-slate-900">
-              {filteredJobs.length} job{filteredJobs.length !== 1 ? 's' : ''} in progress
+              {jobs.length === 0
+                ? 'No jobs yet'
+                : `${filteredJobs.length} job${filteredJobs.length !== 1 ? 's' : ''} in progress`}
             </h2>
           </div>
           <div className="relative">
@@ -106,11 +152,24 @@ export default function DashboardPage() {
         </div>
 
         <div className="divide-y divide-slate-100">
-          {filteredJobs.length === 0 && (
-            <p className="p-6 text-center text-sm text-slate-400">No jobs match your search.</p>
+          {jobs.length === 0 && (
+            <div className="p-8 text-center">
+              <p className="text-lg font-semibold text-slate-900">Your jobs will show up here</p>
+              <p className="mt-2 text-sm text-slate-500">
+                Once a user uploads a new job, it will appear in this list automatically.
+              </p>
+            </div>
           )}
+
+          {jobs.length > 0 && filteredJobs.length === 0 && (
+            <div className="p-8 text-center">
+              <p className="text-lg font-semibold text-slate-900">No jobs match your search</p>
+              <p className="mt-2 text-sm text-slate-500">Try a different keyword to find the job you need.</p>
+            </div>
+          )}
+
           {filteredJobs.map((job) => (
-            <div key={job.name} className="flex items-center justify-between gap-4 px-5 py-4">
+            <div key={job.id} className="flex items-center justify-between gap-4 px-5 py-4">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <strong className="truncate text-sm font-medium text-slate-900">{job.name}</strong>
