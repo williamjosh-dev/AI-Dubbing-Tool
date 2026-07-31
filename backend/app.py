@@ -84,6 +84,10 @@ def parse_flag(value: str) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def is_ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None
+
+
 def run_ffmpeg(command: list[str]) -> None:
     try:
         subprocess.run(command, check=True, capture_output=True)
@@ -140,7 +144,7 @@ def replace_audio_in_video(video_path: Path, audio_path: Path, output_path: Path
 
 @app.get("/api/health")
 def health_check() -> dict:
-    return {"ok": True}
+    return {"ok": True, "ffmpegAvailable": is_ffmpeg_available()}
 
 
 @app.post("/api/dub")
@@ -155,6 +159,12 @@ def dub_audio(
 ) -> dict:
     if not audioFile.filename:
         raise HTTPException(status_code=400, detail="A file name is required.")
+
+    if not is_ffmpeg_available():
+        raise HTTPException(
+            status_code=503,
+            detail="FFmpeg is required for video/audio uploads but was not found on PATH.",
+        )
 
     if not has_allowed_extension(audioFile.filename):
         raise HTTPException(status_code=400, detail="Unsupported file type.")
