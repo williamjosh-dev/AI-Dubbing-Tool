@@ -4,7 +4,6 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
     ArrowRight,
-    CheckCircle2,
     Clapperboard,
     FileAudio2,
     Globe2,
@@ -19,180 +18,254 @@ import {
     WandSparkles,
 } from 'lucide-react';
 
-const sourceLanguages = ['English', 'Spanish', 'French', 'German', 'Hindi'];
-const targetLanguages = ['Spanish', 'French', 'Arabic', 'Portuguese', 'Japanese'];
-const voiceStyles = ['Natural', 'Energetic', 'Cinematic', 'Warm'];
-const exportFormats = ['MP4', 'MOV', 'WAV'];
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:5000';
+
+const sourceLanguages = [
+    { label: 'English', value: 'en' },
+    { label: 'Spanish', value: 'es' },
+    { label: 'French', value: 'fr' },
+    { label: 'German', value: 'de' },
+    { label: 'Hindi', value: 'hi' },
+];
+
+const targetLanguages = [
+    { label: 'Spanish', value: 'es' },
+    { label: 'French', value: 'fr' },
+    { label: 'Arabic', value: 'ar' },
+    { label: 'Portuguese', value: 'pt' },
+    { label: 'Japanese', value: 'ja' },
+];
+
+const voiceMethods = [
+    { label: 'Auto', value: '' },
+    { label: 'ElevenLabs', value: 'elevenlabs' },
+    { label: 'Google Cloud', value: 'google' },
+    { label: 'Coqui', value: 'coqui' },
+    { label: 'gTTS', value: 'gtts' },
+];
+
+const exportFormats = [
+    { label: 'WAV', value: 'wav' },
+    { label: 'MP3', value: 'mp3' },
+];
 
 const dubbingSteps = [
-    {
-        title: 'Upload a video',
-        detail: 'Drop a video file into the workspace or browse your files to begin.',
-    },
-    {
-        title: 'Pick the language pair',
-        detail: 'Choose the source language and the language you want the dub rendered in.',
-    },
-    {
-        title: 'Adjust delivery settings',
-        detail: 'Set the voice style, speed, and export format before processing later.',
-    },
+    { title: 'Upload a file', detail: 'Drop audio or video into the browser and send it to the backend.' },
+    { title: 'Pick the language pair', detail: 'Choose the source and target languages before processing.' },
+    { title: 'Generate the dub', detail: 'The backend transcribes, translates, synthesizes, and returns download links.' },
 ];
 
 const qualityOptions = [
-    { label: 'Voice alignment', value: 'High', tone: 'text-emerald-700 bg-emerald-50 ring-emerald-200' },
-    { label: 'Subtitle track', value: 'Enabled', tone: 'text-sky-700 bg-sky-50 ring-sky-200' },
-    { label: 'Lip sync', value: 'Preview', tone: 'text-amber-700 bg-amber-50 ring-amber-200' },
-];
-
-const betaHighlights = [
-    'Upload flow is ready for test users.',
-    'Language and voice presets can be exercised without backend wiring.',
-    'Preview cards show what will be powered by the pipeline later.',
+    { label: 'Transcription', value: 'Local Whisper', tone: 'text-emerald-700 bg-emerald-50 ring-emerald-200' },
+    { label: 'Translation', value: 'Segmented', tone: 'text-sky-700 bg-sky-50 ring-sky-200' },
+    { label: 'Output', value: 'Audio + video', tone: 'text-amber-700 bg-amber-50 ring-amber-200' },
 ];
 
 const quickStats = [
-    { label: 'Upload status', value: 'Ready', tone: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
-    { label: 'Backend', value: 'Not connected', tone: 'bg-slate-100 text-slate-700 ring-slate-200' },
-    { label: 'Beta mode', value: 'On', tone: 'bg-indigo-50 text-indigo-700 ring-indigo-200' },
+    { label: 'API', value: 'Connected', tone: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
+    { label: 'Backend', value: 'FastAPI', tone: 'bg-indigo-50 text-indigo-700 ring-indigo-200' },
+    { label: 'Mode', value: 'Live upload', tone: 'bg-slate-100 text-slate-700 ring-slate-200' },
 ];
 
+function buildMediaUrl(path) {
+    if (!path) return '';
+    return `${API_BASE_URL}${path}`;
+}
+
+function formatError(error) {
+    if (!error) return 'Something went wrong while processing the file.';
+    if (typeof error === 'string') return error;
+    if (Array.isArray(error)) return error.map((item) => item?.msg || item?.message || String(item)).join(', ');
+    return error.detail || error.message || JSON.stringify(error);
+}
+
 export default function DubbingPage() {
-    const [selectedSource, setSelectedSource] = useState('English');
-    const [selectedTarget, setSelectedTarget] = useState('Spanish');
-    const [selectedVoice, setSelectedVoice] = useState('Natural');
-    const [selectedFormat, setSelectedFormat] = useState('MP4');
-    const [selectedFile, setSelectedFile] = useState('No file selected yet');
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [selectedSource, setSelectedSource] = useState('en');
+    const [selectedTarget, setSelectedTarget] = useState('es');
+    const [selectedVoiceMethod, setSelectedVoiceMethod] = useState('');
+    const [selectedFormat, setSelectedFormat] = useState('wav');
+    const [enhanceAudio, setEnhanceAudio] = useState(true);
+    const [voiceClone, setVoiceClone] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [result, setResult] = useState(null);
+    const [error, setError] = useState('');
 
     const projectSummary = useMemo(
         () => [
-            { label: 'Source language', value: selectedSource },
-            { label: 'Target language', value: selectedTarget },
-            { label: 'Voice style', value: selectedVoice },
-            { label: 'Export format', value: selectedFormat },
+            { label: 'Source language', value: sourceLanguages.find((item) => item.value === selectedSource)?.label || selectedSource },
+            { label: 'Target language', value: targetLanguages.find((item) => item.value === selectedTarget)?.label || selectedTarget },
+            { label: 'Voice engine', value: voiceMethods.find((item) => item.value === selectedVoiceMethod)?.label || 'Auto' },
+            { label: 'Export format', value: selectedFormat.toUpperCase() },
         ],
-        [selectedSource, selectedTarget, selectedVoice, selectedFormat]
+        [selectedSource, selectedTarget, selectedVoiceMethod, selectedFormat]
     );
 
     const handleFileChange = (event) => {
-        const file = event.target.files?.[0];
-        setSelectedFile(file ? file.name : 'No file selected yet');
+        const file = event.target.files?.[0] || null;
+        setSelectedFile(file);
+        setError('');
+        setResult(null);
     };
+
+    const handleSubmit = async () => {
+        if (!selectedFile) {
+            setError('Choose an audio or video file before starting the dub.');
+            return;
+        }
+
+        setIsSubmitting(true);
+        setError('');
+        setResult(null);
+
+        try {
+            const formData = new FormData();
+            formData.append('audioFile', selectedFile);
+            formData.append('srcLang', selectedSource);
+            formData.append('tgtLang', selectedTarget);
+            formData.append('voiceClone', voiceClone ? 'on' : 'off');
+            formData.append('voiceMethod', selectedVoiceMethod);
+            formData.append('outputFormat', selectedFormat);
+            formData.append('enhanceAudio', enhanceAudio ? 'on' : 'off');
+
+            const response = await fetch(`${API_BASE_URL}/api/dub`, {
+                method: 'POST',
+                body: formData,
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(formatError(data));
+            }
+
+            setResult(data);
+        } catch (submitError) {
+            setError(submitError instanceof Error ? submitError.message : 'Failed to submit the job.');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const audioUrl = result?.audioUrl ? buildMediaUrl(result.audioUrl) : '';
+    const videoUrl = result?.videoUrl ? buildMediaUrl(result.videoUrl) : '';
+    const transcriptUrl = result?.transcriptUrl ? buildMediaUrl(result.transcriptUrl) : '';
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            {/* Hero */}
-            <header className="bg-slate-900 rounded-xl p-8 text-white">
-                <div className="max-w-3xl">
-                    <h1 className="text-3xl font-semibold sm:text-4xl">Upload a video and prepare the dub</h1>
+            <input
+                id="dubbing-upload-input"
+                type="file"
+                accept="video/*,audio/*"
+                className="sr-only"
+                onChange={handleFileChange}
+            />
+
+            <header className="hero-shell text-white">
+                <div className="absolute inset-0 opacity-30 [background-image:radial-gradient(circle_at_top_right,rgba(99,102,241,0.55),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(56,189,248,0.2),transparent_28%)]" />
+                <div className="relative max-w-3xl">
+                    <p className="beta-pill w-fit">Live FastAPI upload</p>
+                    <h1 className="mt-4 text-3xl font-semibold sm:text-4xl">Upload a file and generate the dub</h1>
                     <p className="mt-3 text-sm text-slate-300 sm:text-base">
-                        Upload your video, choose source and target languages, pick a voice style, and export a dubbed version.
-                        Preview everything locally before you process or download.
+                        Pick your languages and TTS engine, send the file to the backend, and get back downloadable audio, transcript,
+                        and video links when the source is a video.
                     </p>
 
                     <div className="mt-6 flex flex-wrap gap-3">
-                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-slate-100">
+                        <label htmlFor="dubbing-upload-input" className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-slate-100">
                             <UploadCloud className="h-4 w-4" />
-                            Browse files
-                            <input type="file" accept="video/*" className="hidden" onChange={handleFileChange} />
+                            Browse file
                         </label>
-                        <Link
-                            href="/dashboard"
-                            className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20"
+                        <button
+                            type="button"
+                            onClick={handleSubmit}
+                            disabled={isSubmitting}
+                            className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                            View dashboard
+                            {isSubmitting ? 'Processing...' : 'Start dubbing'}
                             <ArrowRight className="h-4 w-4" />
-                        </Link>
+                        </button>
                     </div>
                 </div>
             </header>
 
-            {/* Main workspace: 12-column grid (left 8 / right 4) */}
-            <div className="mt-8 grid grid-cols-1 lg:grid-cols-12 gap-6">
-                {/* Left main column (approx 66%) */}
+            <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-12">
                 <main className="lg:col-span-8 space-y-6">
-                    {/* Upload workspace card */}
-                    <section className="bg-white rounded-lg p-6 shadow-sm border border-slate-200">
-                        <div className="flex items-center justify-between">
+                    <section className="panel">
+                        <div className="flex items-center justify-between gap-4">
                             <div className="flex items-center gap-3">
                                 <UploadCloud className="h-5 w-5 text-indigo-600" />
                                 <h2 className="text-lg font-semibold text-slate-900">Upload workspace</h2>
                             </div>
-                            <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">Preview mode</span>
+                            <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
+                                {selectedFile ? selectedFile.name : 'No file selected'}
+                            </span>
                         </div>
 
-                        <div className="mt-4">
+                        <label htmlFor="dubbing-upload-input" className="mt-4 block cursor-pointer upload-dropzone">
                             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600/10 text-indigo-600">
                                 <Clapperboard className="h-6 w-6" />
                             </div>
-                            <p className="mt-4 text-lg font-semibold text-slate-900">Drop your video here</p>
+                            <p className="mt-4 text-lg font-semibold text-slate-900">Drop your audio or video here</p>
                             <p className="mt-2 text-sm text-slate-500">
-                                Upload your video to preview the dubbing workflow. Nothing is sent to a server until you start
-                                processing.
+                                The selected file will be posted to the backend as multipart form data and processed end to end.
                             </p>
-                            <div className="mt-5">
-                                <input
-                                    id="file-input"
-                                    type="file"
-                                    accept="video/*,audio/*"
-                                    className="hidden"
-                                    onChange={handleFileChange}
-                                />
 
-                                <label htmlFor="file-input" className="group block cursor-pointer rounded-lg border-2 border-dashed border-slate-200 p-6 hover:border-indigo-500">
-                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                        <div className="flex flex-col items-center justify-center rounded-lg bg-slate-50 p-4 text-center">
-                                            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600/10 text-indigo-600">
-                                                <FileAudio2 className="h-6 w-6" />
-                                            </div>
-                                            <p className="mt-3 font-medium text-slate-900">Upload a file</p>
-                                            <p className="mt-1 text-xs text-slate-500">Video, audio, or music (MP4, MOV, MP3, WAV)</p>
-                                        </div>
-
-                                        <div className="flex flex-col items-center justify-center rounded-lg bg-white p-4 text-center ring-1 ring-slate-100">
-                                            <div className="text-indigo-600">🎵</div>
-                                            <p className="mt-3 font-medium text-slate-900">Try a sample</p>
-                                            <p className="mt-1 text-xs text-slate-500">Preview with example audio</p>
-                                        </div>
-
-                                        <div className="flex flex-col items-center justify-center rounded-lg bg-white p-4 text-center ring-1 ring-slate-100">
-                                            <div className="text-indigo-600">🔗</div>
-                                            <p className="mt-3 font-medium text-slate-900">Paste URL</p>
-                                            <p className="mt-1 text-xs text-slate-500">Use a remote file for quick testing</p>
-                                        </div>
+                            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                                <div className="flex flex-col items-center justify-center rounded-lg bg-white p-4 text-center ring-1 ring-slate-100">
+                                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600/10 text-indigo-600">
+                                        <FileAudio2 className="h-6 w-6" />
                                     </div>
+                                    <p className="mt-3 font-medium text-slate-900">Upload file</p>
+                                    <p className="mt-1 text-xs text-slate-500">MP4, MOV, MP3, WAV, and more</p>
+                                </div>
 
-                                    <p className="mt-4 text-xs text-slate-400">Click the box to select a file from your device. Accepted: video and audio files.</p>
-                                </label>
+                                <div className="flex flex-col items-center justify-center rounded-lg bg-white p-4 text-center ring-1 ring-slate-100">
+                                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-sky-600/10 text-sky-600">
+                                        <Sparkles className="h-6 w-6" />
+                                    </div>
+                                    <p className="mt-3 font-medium text-slate-900">Translate</p>
+                                    <p className="mt-1 text-xs text-slate-500">Segmented transcription and translation</p>
+                                </div>
 
-                                <p className="mt-3 text-xs text-slate-400">Selected file: {selectedFile === 'No file selected yet' ? 'No file selected' : selectedFile}</p>
+                                <div className="flex flex-col items-center justify-center rounded-lg bg-white p-4 text-center ring-1 ring-slate-100">
+                                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600/10 text-emerald-600">
+                                        <ShieldCheck className="h-6 w-6" />
+                                    </div>
+                                    <p className="mt-3 font-medium text-slate-900">Download</p>
+                                    <p className="mt-1 text-xs text-slate-500">Audio, transcript, and optional video</p>
+                                </div>
                             </div>
-                        </div>
 
-                        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="bg-white rounded-lg p-6 shadow-sm border border-slate-200">
+                            <p className="mt-4 text-xs text-slate-400">
+                                Click Browse file to choose a local clip, then press Start dubbing.
+                            </p>
+                        </label>
+
+                        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <div className="panel-soft">
                                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                                     <Music2 className="h-4 w-4 text-indigo-600" />
-                                    Voice style
+                                    Voice engine
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">
-                                    {voiceStyles.map((voice) => (
+                                    {voiceMethods.map((method) => (
                                         <button
-                                            key={voice}
+                                            key={method.label}
                                             type="button"
-                                            onClick={() => setSelectedVoice(voice)}
-                                            className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${selectedVoice === voice
-                                                    ? 'bg-indigo-600 text-white shadow-sm'
-                                                    : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-100'
+                                            onClick={() => setSelectedVoiceMethod(method.value)}
+                                            className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${selectedVoiceMethod === method.value
+                                                ? 'bg-indigo-600 text-white shadow-sm'
+                                                : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-100'
                                                 }`}
                                         >
-                                            {voice}
+                                            {method.label}
                                         </button>
                                     ))}
                                 </div>
                             </div>
 
-                            <div className="bg-white rounded-lg p-6 shadow-sm border border-slate-200">
+                            <div className="panel-soft">
                                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                                     <Settings2 className="h-4 w-4 text-indigo-600" />
                                     Export format
@@ -200,65 +273,117 @@ export default function DubbingPage() {
                                 <div className="mt-3 flex flex-wrap gap-2">
                                     {exportFormats.map((format) => (
                                         <button
-                                            key={format}
+                                            key={format.label}
                                             type="button"
-                                            onClick={() => setSelectedFormat(format)}
-                                            className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${selectedFormat === format
-                                                    ? 'bg-slate-900 text-white shadow-sm'
-                                                    : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-100'
+                                            onClick={() => setSelectedFormat(format.value)}
+                                            className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${selectedFormat === format.value
+                                                ? 'bg-slate-900 text-white shadow-sm'
+                                                : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-100'
                                                 }`}
                                         >
-                                            {format}
+                                            {format.label}
                                         </button>
                                     ))}
                                 </div>
                             </div>
                         </div>
-                    </section>
 
-                    <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-white rounded-lg p-6 shadow-sm border border-slate-200">
-                            <div className="flex items-center gap-2">
-                                <Languages className="h-5 w-5 text-indigo-600" />
-                                <h2 className="text-lg font-semibold text-slate-900">Language pair</h2>
-                            </div>
+                        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <label className="block rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                                <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                                    <Languages className="h-4 w-4 text-indigo-600" />
+                                    Source language
+                                </span>
+                                <select
+                                    value={selectedSource}
+                                    onChange={(event) => setSelectedSource(event.target.value)}
+                                    className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                                >
+                                    {sourceLanguages.map((language) => (
+                                        <option key={language.value} value={language.value}>
+                                            {language.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
 
-                            <div className="mt-4 space-y-4">
-                                <label className="block">
-                                    <span className="text-sm font-medium text-slate-600">Source language</span>
-                                    <select
-                                        value={selectedSource}
-                                        onChange={(event) => setSelectedSource(event.target.value)}
-                                        className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-                                    >
-                                        {sourceLanguages.map((language) => (
-                                            <option key={language} value={language}>
-                                                {language}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
-
-                                <label className="block">
-                                    <span className="text-sm font-medium text-slate-600">Target language</span>
-                                    <select
-                                        value={selectedTarget}
-                                        onChange={(event) => setSelectedTarget(event.target.value)}
-                                        className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-                                    >
-                                        {targetLanguages.map((language) => (
-                                            <option key={language} value={language}>
-                                                {language}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
-                            </div>
+                            <label className="block rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                                <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                                    <Languages className="h-4 w-4 text-indigo-600" />
+                                    Target language
+                                </span>
+                                <select
+                                    value={selectedTarget}
+                                    onChange={(event) => setSelectedTarget(event.target.value)}
+                                    className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                                >
+                                    {targetLanguages.map((language) => (
+                                        <option key={language.value} value={language.value}>
+                                            {language.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
                         </div>
 
-                        <div className="bg-white rounded-lg p-6 shadow-sm border border-slate-200">
+                        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <label className="panel-soft flex items-center justify-between gap-4">
+                                <div>
+                                    <p className="text-sm font-semibold text-slate-900">Enhance audio</p>
+                                    <p className="mt-1 text-sm text-slate-500">Normalize and clean the source before transcription.</p>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={enhanceAudio}
+                                    onChange={(event) => setEnhanceAudio(event.target.checked)}
+                                    className="h-5 w-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                            </label>
+
+                            <label className="panel-soft flex items-center justify-between gap-4">
+                                <div>
+                                    <p className="text-sm font-semibold text-slate-900">Voice clone</p>
+                                    <p className="mt-1 text-sm text-slate-500">Sent through as a flag for future voice-clone support.</p>
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    checked={voiceClone}
+                                    onChange={(event) => setVoiceClone(event.target.checked)}
+                                    className="h-5 w-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                            </label>
+                        </div>
+
+                        <div className="mt-6 flex flex-wrap items-center gap-3">
+                            <button
+                                type="button"
+                                onClick={handleSubmit}
+                                disabled={isSubmitting}
+                                className="btn-primary"
+                            >
+                                <WandSparkles className="h-4 w-4" />
+                                {isSubmitting ? 'Processing...' : 'Start dubbing workflow'}
+                            </button>
+                            <p className="text-sm text-slate-500">The response comes back with live download links from FastAPI.</p>
+                        </div>
+
+                        {error && (
+                            <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                                {error}
+                            </div>
+                        )}
+
+                        {result && result.warnings?.length > 0 && (
+                            <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                                {result.warnings.join(' ')}
+                            </div>
+                        )}
+                    </section>
+
+                    <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div className="panel">
                             <div className="flex items-center gap-2">
-                                <SlidersHorizontal className="h-5 w-5 text-indigo-600" />
+                                <Globe2 className="h-5 w-5 text-indigo-600" />
                                 <h2 className="text-lg font-semibold text-slate-900">Processing notes</h2>
                             </div>
 
@@ -278,34 +403,13 @@ export default function DubbingPage() {
                                 ))}
                             </div>
                         </div>
-                    </section>
-                </main>
 
-                {/* Right column (approx 33%) */}
-                <aside className="lg:col-span-4">
-                    <div className="sticky top-24 space-y-6">
-                        <div className="bg-slate-950 rounded-lg p-6 text-white shadow-inner">
-                            <div className="flex items-center gap-2">
-                                <PlayCircle className="h-5 w-5 text-indigo-400" />
-                                <h3 className="text-lg font-semibold">Preview panel</h3>
+                        <div className="panel">
+                            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                                <SlidersHorizontal className="h-5 w-5 text-indigo-600" />
+                                Project summary
                             </div>
-
-                            <div className="mt-4">
-                                <div className="flex items-center justify-between text-xs text-slate-400">
-                                    <span>Preview timeline</span>
-                                    <span>00:00 / 00:00</span>
-                                </div>
-                                <div className="mt-4 h-40 rounded-lg border border-white/10 bg-gradient-to-br from-slate-800 via-slate-900 to-indigo-950" />
-                                <div className="mt-4 flex items-center justify-between text-sm text-slate-300">
-                                    <span>Video placeholder</span>
-                                    <span>Audio layers ready</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-white rounded-lg p-6 shadow-sm border border-slate-200">
-                            <p className="text-sm font-semibold text-slate-900">Project summary</p>
-                            <div className="mt-3 space-y-2">
+                            <div className="mt-4 space-y-2">
                                 {projectSummary.map((item) => (
                                     <div key={item.label} className="flex items-center justify-between gap-4 text-sm">
                                         <span className="text-slate-500">{item.label}</span>
@@ -313,14 +417,8 @@ export default function DubbingPage() {
                                     </div>
                                 ))}
                             </div>
-                        </div>
 
-                        <div className="bg-white rounded-lg p-6 shadow-sm border border-slate-200">
-                            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                                <Globe2 className="h-4 w-4 text-indigo-600" />
-                                Quality controls
-                            </div>
-                            <div className="mt-3 space-y-2">
+                            <div className="mt-5 space-y-2">
                                 {qualityOptions.map((option) => (
                                     <div key={option.label} className={`flex items-center justify-between rounded-lg px-3 py-2 ring-1 ring-inset ${option.tone}`}>
                                         <span className="text-sm font-medium">{option.label}</span>
@@ -329,26 +427,82 @@ export default function DubbingPage() {
                                 ))}
                             </div>
                         </div>
+                    </section>
+                </main>
 
-                        <div className="grid gap-3 sm:grid-cols-2">
-                            {sourceLanguages.slice(0, 2).map((language, index) => (
-                                <div key={language} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                                        Ready slot {index + 1}
-                                    </div>
-                                    <p className="mt-2 text-sm text-slate-500">{language} source preset</p>
+                <aside className="lg:col-span-4 space-y-6">
+                    <div className="sticky top-24 space-y-6">
+                        <div className="bg-slate-950 rounded-lg p-6 text-white shadow-inner">
+                            <div className="flex items-center gap-2">
+                                <PlayCircle className="h-5 w-5 text-indigo-400" />
+                                <h3 className="text-lg font-semibold">Result preview</h3>
+                            </div>
+
+                            <div className="mt-4 space-y-3 text-sm text-slate-300">
+                                <div className="flex items-center justify-between text-xs text-slate-400">
+                                    <span>Status</span>
+                                    <span>{isSubmitting ? 'Processing' : result ? 'Complete' : 'Waiting'}</span>
                                 </div>
-                            ))}
+                                <div className="h-40 rounded-lg border border-white/10 bg-gradient-to-br from-slate-800 via-slate-900 to-indigo-950" />
+                                <p className="text-slate-300">
+                                    {result ? 'Downloads are ready below.' : 'Start a job to see the generated files and transcript summary.'}
+                                </p>
+                            </div>
                         </div>
 
-                        <button
-                            type="button"
-                            className="mt-2 w-full rounded-lg bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
-                        >
-                            <Clapperboard className="h-4 w-4 inline-block mr-2" />
-                            Start dubbing workflow
-                        </button>
+                        <div className="panel">
+                            <p className="text-sm font-semibold text-slate-900">Quick status</p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                {quickStats.map((item) => (
+                                    <span key={item.label} className={`summary-chip ${item.tone}`}>
+                                        {item.label}: {item.value}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="panel">
+                            <p className="text-sm font-semibold text-slate-900">Download links</p>
+                            <div className="mt-3 space-y-3 text-sm">
+                                {audioUrl ? (
+                                    <a className="block rounded-lg border border-slate-200 px-4 py-3 font-medium text-indigo-700 hover:bg-indigo-50" href={audioUrl} target="_blank" rel="noreferrer">
+                                        Download dubbed audio
+                                    </a>
+                                ) : (
+                                    <div className="rounded-lg border border-slate-200 px-4 py-3 text-slate-400">Audio will appear here after processing.</div>
+                                )}
+
+                                {videoUrl ? (
+                                    <a className="block rounded-lg border border-slate-200 px-4 py-3 font-medium text-indigo-700 hover:bg-indigo-50" href={videoUrl} target="_blank" rel="noreferrer">
+                                        Download dubbed video
+                                    </a>
+                                ) : null}
+
+                                {transcriptUrl ? (
+                                    <a className="block rounded-lg border border-slate-200 px-4 py-3 font-medium text-indigo-700 hover:bg-indigo-50" href={transcriptUrl} target="_blank" rel="noreferrer">
+                                        Download transcript
+                                    </a>
+                                ) : null}
+                            </div>
+                        </div>
+
+                        {result?.translatedText ? (
+                            <div className="panel">
+                                <p className="text-sm font-semibold text-slate-900">Translated text</p>
+                                <p className="mt-3 text-sm text-slate-600">{result.translatedText}</p>
+                                <p className="mt-3 text-xs text-slate-400">
+                                    {result.translatedSegments?.length || 0} translated segments returned by the backend.
+                                </p>
+                            </div>
+                        ) : null}
+
+                        {audioUrl ? (
+                            <div className="panel">
+                                <p className="text-sm font-semibold text-slate-900">Playback</p>
+                                <audio className="mt-3 w-full" controls src={audioUrl} />
+                                {videoUrl ? <video className="mt-4 w-full rounded-lg border border-slate-200" controls src={videoUrl} /> : null}
+                            </div>
+                        ) : null}
                     </div>
                 </aside>
             </div>

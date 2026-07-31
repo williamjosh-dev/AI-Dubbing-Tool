@@ -28,7 +28,7 @@ class AudioTranslationPipeline:
 
     def transcribe(self, audio_path: str) -> List[dict]:
         """Transcribe audio into timestamped text segments."""
-        return transcribe_audio(audio_path)
+        return transcribe_audio(audio_path, language=self.src_lang)
 
     def translate(self, text: str) -> str:
         """Translate text from source language to target language."""
