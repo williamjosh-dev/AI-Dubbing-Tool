@@ -16,7 +16,7 @@ const highlights = [
 export default function HomePage() {
   return (
     <main className="mx-auto max-w-6xl px-6 py-10 space-y-8">
-      <section className="overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 p-8 text-white shadow-sm">
+      <section className="overflow-hidden rounded-2xl bg-linear-to-br from-slate-900 via-slate-900 to-indigo-950 p-8 text-white shadow-sm">
         <p className="text-sm font-medium text-indigo-200">Welcome</p>
         <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Create your first dubbing project</h1>
         <p className="mt-3 max-w-2xl text-sm text-slate-300 sm:text-base">
@@ -25,11 +25,11 @@ export default function HomePage() {
 
         <div className="mt-6 flex flex-wrap gap-3">
           <Link
-            href="/dashboard"
+            href="/dubbing"
             className="inline-flex items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-slate-100"
           >
             <UploadCloud className="h-4 w-4" />
-            Get Started
+            Open Dubbing Page
           </Link>
           <Link
             href="/history"

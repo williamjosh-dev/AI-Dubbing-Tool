@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Home, History, Mic2 } from 'lucide-react';
+import { LayoutDashboard, Home, History, Mic2, Clapperboard } from 'lucide-react';
 
 const navItems = [
   { href: '/', label: 'Home', icon: Home },
+  { href: '/dubbing', label: 'Dubbing', icon: Clapperboard },
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/history', label: 'History', icon: History },
 ];
