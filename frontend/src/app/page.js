@@ -17,7 +17,7 @@ const steps = [
 export default function HomePage() {
   return (
     <div className="mx-auto max-w-6xl px-6 py-12 space-y-12">
-      <section className="overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 p-10 text-white shadow-lg">
+      <section className="overflow-hidden rounded-2xl bg-linear-to-br from-slate-900 to-slate-800 p-10 text-white shadow-lg">
         <p className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-indigo-200">
           <Sparkles className="h-3.5 w-3.5" />
           AI Dubbing, reimagined
