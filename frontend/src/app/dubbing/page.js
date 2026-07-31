@@ -18,7 +18,7 @@ import {
     WandSparkles,
 } from 'lucide-react';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:5000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
 const sourceLanguages = [
     { label: 'English', value: 'en' },
@@ -69,7 +69,7 @@ const quickStats = [
 
 function buildMediaUrl(path) {
     if (!path) return '';
-    return `${API_BASE_URL}${path}`;
+    return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
 }
 
 function formatError(error) {
