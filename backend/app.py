@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 import uuid
@@ -14,6 +15,7 @@ BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 UPLOAD_DIR = ROOT_DIR / "uploads"
 OUTPUT_DIR = ROOT_DIR / "outputs"
+FFMPEG_PATH = os.getenv("FFMPEG_PATH", "ffmpeg")
 
 ALLOWED_EXTENSIONS = {"mp3", "wav", "ogg", "flac", "m4a", "mp4", "mov", "avi", "mkv", "webm"}
 VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "mkv", "webm"}
@@ -85,7 +87,7 @@ def parse_flag(value: str) -> bool:
 
 
 def is_ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None
+    return shutil.which(FFMPEG_PATH) is not None
 
 
 def run_ffmpeg(command: list[str]) -> None:
@@ -103,7 +105,7 @@ def run_ffmpeg(command: list[str]) -> None:
 def extract_audio(source_path: Path, target_path: Path, enhance_audio: bool) -> None:
     target_path.parent.mkdir(parents=True, exist_ok=True)
     command = [
-        "ffmpeg",
+        FFMPEG_PATH,
         "-y",
         "-i",
         str(source_path),
@@ -122,7 +124,7 @@ def extract_audio(source_path: Path, target_path: Path, enhance_audio: bool) -> 
 def replace_audio_in_video(video_path: Path, audio_path: Path, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     command = [
-        "ffmpeg",
+        FFMPEG_PATH,
         "-y",
         "-i",
         str(video_path),
