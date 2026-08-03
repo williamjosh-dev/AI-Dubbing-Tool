@@ -149,53 +149,28 @@ def health_check() -> dict:
     return {"ok": True, "ffmpegAvailable": is_ffmpeg_available()}
 
 
-@app.post("/api/dub")
-def dub_audio(
-    audioFile: UploadFile = File(...),
-    srcLang: str = Form("en"),
-    tgtLang: str = Form("es"),
-    voiceClone: str = Form("off"),
-    voiceMethod: Optional[str] = Form(None),
-    outputFormat: str = Form("wav"),
-    enhanceAudio: str = Form("off"),
-) -> dict:
-    if not audioFile.filename:
-        raise HTTPException(status_code=400, detail="A file name is required.")
 
-    if not is_ffmpeg_available():
-        raise HTTPException(
-            status_code=503,
-            detail="FFmpeg is required for video/audio uploads but was not found on PATH.",
-        )
+JOBS: dict[str, dict] = {}
 
-    if not has_allowed_extension(audioFile.filename):
-        raise HTTPException(status_code=400, detail="Unsupported file type.")
 
-    job_id = uuid.uuid4().hex[:12]
-    original_ext = audioFile.filename.rsplit(".", 1)[1].lower()
-    safe_stem = Path(audioFile.filename).stem.replace(" ", "_")
-    source_path = UPLOAD_DIR / f"{job_id}_{safe_stem}.{original_ext}"
-
-    with source_path.open("wb") as buffer:
-        shutil.copyfileobj(audioFile.file, buffer)
-
-    is_video = is_video_file(audioFile.filename)
-    source_language = normalize_language(srcLang, "en")
-    target_language = normalize_language(tgtLang, "es")
-    output_format = normalize_output_format(outputFormat)
-    enhance_flag = parse_flag(enhanceAudio)
-    voice_method = (voiceMethod or "").strip().lower() or None
-
-    warnings = []
-    if parse_flag(voiceClone):
-        warnings.append("Voice cloning is not enabled yet; using the selected TTS engine instead.")
-
-    working_audio_path = OUTPUT_DIR / f"{job_id}_input.wav"
-    dubbed_audio_path = OUTPUT_DIR / f"{job_id}_dubbed.{output_format}"
-    transcript_path = OUTPUT_DIR / f"{job_id}_transcript.txt"
-    dubbed_video_path = OUTPUT_DIR / f"{job_id}_dubbed.mp4"
-
+def run_dubbing_pipeline(
+    job_id: str,
+    source_path: Path,
+    working_audio_path: Path,
+    dubbed_audio_path: Path,
+    transcript_path: Path,
+    dubbed_video_path: Path,
+    is_video: bool,
+    source_language: str,
+    target_language: str,
+    voice_method: Optional[str],
+    output_format: str,
+    enhance_flag: bool,
+    warnings: list[str],
+) -> None:
     try:
+        JOBS[job_id]["status"] = "processing"
+
         extract_audio(source_path, working_audio_path, enhance_flag)
 
         pipeline = AudioTranslationPipeline(
@@ -229,17 +204,93 @@ def dub_audio(
             replace_audio_in_video(source_path, dubbed_audio_path, dubbed_video_path)
             response["videoUrl"] = f"/outputs/{dubbed_video_path.name}"
 
-        return response
+        JOBS[job_id]["status"] = "completed"
+        JOBS[job_id]["result"] = response
 
-    except HTTPException:
-        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    finally:
-        try:
-            audioFile.file.close()
-        except Exception:
-            pass
+        JOBS[job_id]["status"] = "failed"
+        JOBS[job_id]["error"] = str(exc)
+
+
+@app.post("/api/dub")
+def dub_audio(
+    background_tasks: BackgroundTasks,
+    audioFile: UploadFile = File(...),
+    srcLang: str = Form("en"),
+    tgtLang: str = Form("es"),
+    voiceClone: str = Form("off"),
+    voiceMethod: Optional[str] = Form(None),
+    outputFormat: str = Form("wav"),
+    enhanceAudio: str = Form("off"),
+) -> dict:
+    if not audioFile.filename:
+        raise HTTPException(status_code=400, detail="A file name is required.")
+
+    if not is_ffmpeg_available():
+        raise HTTPException(
+            status_code=503,
+            detail="FFmpeg is required for video/audio uploads but was not found on PATH.",
+        )
+
+    if not has_allowed_extension(audioFile.filename):
+        raise HTTPException(status_code=400, detail="Unsupported file type.")
+
+    job_id = uuid.uuid4().hex[:12]
+    original_ext = audioFile.filename.rsplit(".", 1)[1].lower()
+    safe_stem = Path(audioFile.filename).stem.replace(" ", "_")
+    source_path = UPLOAD_DIR / f"{job_id}_{safe_stem}.{original_ext}"
+
+    with source_path.open("wb") as buffer:
+        shutil.copyfileobj(audioFile.file, buffer)
+
+    try:
+        audioFile.file.close()
+    except Exception:
+        pass
+
+    is_video = is_video_file(audioFile.filename)
+    source_language = normalize_language(srcLang, "en")
+    target_language = normalize_language(tgtLang, "es")
+    output_format = normalize_output_format(outputFormat)
+    enhance_flag = parse_flag(enhanceAudio)
+    voice_method = (voiceMethod or "").strip().lower() or None
+
+    warnings = []
+    if parse_flag(voiceClone):
+        warnings.append("Voice cloning is not enabled yet; using the selected TTS engine instead.")
+
+    working_audio_path = OUTPUT_DIR / f"{job_id}_input.wav"
+    dubbed_audio_path = OUTPUT_DIR / f"{job_id}_dubbed.{output_format}"
+    transcript_path = OUTPUT_DIR / f"{job_id}_transcript.txt"
+    dubbed_video_path = OUTPUT_DIR / f"{job_id}_dubbed.mp4"
+
+    JOBS[job_id] = {"status": "queued"}
+
+    background_tasks.add_task(
+        run_dubbing_pipeline,
+        job_id,
+        source_path,
+        working_audio_path,
+        dubbed_audio_path,
+        transcript_path,
+        dubbed_video_path,
+        is_video,
+        source_language,
+        target_language,
+        voice_method,
+        output_format,
+        enhance_flag,
+        warnings,
+    )
+
+    return {"jobId": job_id, "status": "queued"}
+
+
+@app.get("/api/status/{job_id}")
+def get_job_status(job_id: str) -> dict:
+    if job_id not in JOBS:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return JOBS[job_id]
 
 
 if __name__ == "__main__":
