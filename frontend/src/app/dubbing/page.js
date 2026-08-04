@@ -88,6 +88,7 @@ export default function DubbingPage() {
     const [enhanceAudio, setEnhanceAudio] = useState(true);
     const [voiceClone, setVoiceClone] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [jobStatus, setJobStatus] = useState(''); // Tracking background task status
     const [result, setResult] = useState(null);
     const [error, setError] = useState('');
 
@@ -106,6 +107,7 @@ export default function DubbingPage() {
         setSelectedFile(file);
         setError('');
         setResult(null);
+        setJobStatus('');
     };
 
     const handleSubmit = async () => {
@@ -117,6 +119,7 @@ export default function DubbingPage() {
         setIsSubmitting(true);
         setError('');
         setResult(null);
+        setJobStatus('Queuing job...');
 
         try {
             const formData = new FormData();
@@ -128,6 +131,7 @@ export default function DubbingPage() {
             formData.append('outputFormat', selectedFormat);
             formData.append('enhanceAudio', enhanceAudio ? 'on' : 'off');
 
+            // 1. Send file to initiate background processing
             const response = await fetch(`${API_BASE_URL}/api/dub`, {
                 method: 'POST',
                 body: formData,
@@ -139,25 +143,64 @@ export default function DubbingPage() {
                 throw new Error(formatError(data));
             }
 
-            setResult(data);
+            const jobId = data.jobId;
+            setJobStatus('Processing dubbing task...');
+
+            // 2. Poll the status endpoint until complete or failed
+            await new Promise((resolve, reject) => {
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const statusRes = await fetch(`${API_BASE_URL}/api/status/${jobId}`);
+                        const jobData = await statusRes.json();
+
+                        if (!statusRes.ok) {
+                            clearInterval(pollInterval);
+                            reject(new Error(formatError(jobData)));
+                            return;
+                        }
+
+                        if (jobData.status === 'completed') {
+                            clearInterval(pollInterval);
+                            setResult(jobData.result);
+                            setJobStatus('');
+                            resolve();
+                        } else if (jobData.status === 'failed') {
+                            clearInterval(pollInterval);
+                            reject(new Error(jobData.error || 'Dubbing processing failed on backend.'));
+                        } else {
+                            setJobStatus(`Status: ${jobData.status}...`);
+                        }
+                    } catch (pollErr) {
+                        clearInterval(pollInterval);
+                        reject(pollErr);
+                    }
+                }, 3000); // Check every 3 seconds
+            });
+
         } catch (submitError) {
             setError(submitError instanceof Error ? submitError.message : 'Failed to submit the job.');
+            setJobStatus('');
         } finally {
             setIsSubmitting(false);
         }
     };
-
-    const audioUrl = result?.audioUrl ? buildMediaUrl(result.audioUrl) : '';
-    const videoUrl = result?.videoUrl ? buildMediaUrl(result.videoUrl) : '';
-    const transcriptUrl = result?.transcriptUrl ? buildMediaUrl(result.transcriptUrl) : '';
-
+            const audioUrl = result?.audioUrl ? buildMediaUrl(result.audioUrl) : '';
+            const videoUrl = result?.videoUrl ? buildMediaUrl(result.videoUrl) : '';
+            const transcriptUrl = result?.transcriptUrl ? buildMediaUrl(result.transcriptUrl) : '';
     return (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <form
+            className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
+            onSubmit={(event) => {
+                event.preventDefault();
+                handleSubmit();
+            }}
+        >
             <input
                 id="dubbing-upload-input"
                 type="file"
                 accept="video/*,audio/*"
                 className="sr-only"
+                aria-label="Upload audio or video file"
                 onChange={handleFileChange}
             />
 
@@ -170,6 +213,11 @@ export default function DubbingPage() {
                         Pick your languages and TTS engine, send the file to the backend, and get back downloadable audio, transcript,
                         and video links when the source is a video.
                     </p>
+                    {jobStatus && (
+                        <p className="mt-2 text-sm text-amber-300 animate-pulse font-medium">
+                            {jobStatus}
+                        </p>
+                    )}
 
                     <div className="mt-6 flex flex-wrap gap-3">
                         <label htmlFor="dubbing-upload-input" className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-slate-100">
@@ -177,8 +225,7 @@ export default function DubbingPage() {
                             Browse file
                         </label>
                         <button
-                            type="button"
-                            onClick={handleSubmit}
+                            type="submit"
                             disabled={isSubmitting}
                             className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
                         >
@@ -356,8 +403,7 @@ export default function DubbingPage() {
 
                         <div className="mt-6 flex flex-wrap items-center gap-3">
                             <button
-                                type="button"
-                                onClick={handleSubmit}
+                                type="submit"
                                 disabled={isSubmitting}
                                 className="btn-primary"
                             >
@@ -506,7 +552,7 @@ export default function DubbingPage() {
                     </div>
                 </aside>
             </div>
-        </div>
+        </form>
     );
 }
     

@@ -169,16 +169,20 @@ def run_dubbing_pipeline(
     warnings: list[str],
 ) -> None:
     try:
+        print(f"[{job_id}] Starting dubbing process...")
         JOBS[job_id]["status"] = "processing"
 
+        print(f"[{job_id}] Extracting audio...")
         extract_audio(source_path, working_audio_path, enhance_flag)
 
+        print(f"[{job_id}] Initializing translation pipeline...")
         pipeline = AudioTranslationPipeline(
             src_lang=source_language,
             tgt_lang=target_language,
             voice_method=voice_method,
         )
 
+        print(f"[{job_id}] Running pipeline (STT, Translate, TTS)...")
         pipeline_result = pipeline.run(
             audio_path=str(working_audio_path),
             output_audio_path=str(dubbed_audio_path),
@@ -201,16 +205,18 @@ def run_dubbing_pipeline(
         }
 
         if is_video:
+            print(f"[{job_id}] Merging audio back into video...")
             replace_audio_in_video(source_path, dubbed_audio_path, dubbed_video_path)
             response["videoUrl"] = f"/outputs/{dubbed_video_path.name}"
 
         JOBS[job_id]["status"] = "completed"
         JOBS[job_id]["result"] = response
+        print(f"[{job_id}] Task completed successfully!")
 
     except Exception as exc:
+        print(f"[{job_id}] ERROR: {exc}")
         JOBS[job_id]["status"] = "failed"
         JOBS[job_id]["error"] = str(exc)
-
 
 @app.post("/api/dub")
 def dub_audio(
