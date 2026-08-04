@@ -1,9 +1,22 @@
+# Web Framework & API Server
 fastapi
 uvicorn
 python-multipart
 python-dotenv>=1.0
+
+# Speech Recognition & Translation
 faster-whisper
 deep-translator
-gtts
+
+# Text-to-Speech (TTS) Engines
+coqui-tts
 google-cloud-texttospeech
+gtts
 elevenlabs
+
+# Audio Processing & Utilities
+pydub
+
+# Hugging Face Compatibility Fixes
+transformers==4.38.2
+huggingface-hub<=0.23.0
