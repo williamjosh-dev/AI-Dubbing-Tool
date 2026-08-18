@@ -116,14 +116,14 @@ def _generate_speech_gtts(text, output_path):
         raise
 
 
-def generate_speech(text, output_path, voice_method=None):
+def generate_speech(text, output_path, voice_method="auto"):
     """
-    Generate speech from text using multiple TTS services with fallback to gTTS.
+    Generate speech from text using multiple TTS services with automatic fallback.
 
     Args:
         text (str): Text to convert to speech
         output_path (str): Full path where to save the audio file
-        voice_method (str|None): Preferred method ('elevenlabs', 'zonos2', or 'gtts').
+        voice_method (str): 'auto', 'zonos2', 'elevenlabs', or 'gtts'. Defaults to 'auto'.
 
     Returns:
         str: Path to the generated audio file
@@ -142,7 +142,11 @@ def generate_speech(text, output_path, voice_method=None):
 
     print(f"🎵 Generating speech for text: '{text[:50]}...'")
 
-    if voice_method == 'zonos2':
+    # Normalize method selection
+    voice_method = (voice_method or "auto").lower()
+
+    if voice_method in ('auto', 'zonos2'):
+        # Auto mode & Zonos2 mode: Try Zonos 2 first -> ElevenLabs -> gTTS
         tts_methods = [
             ("Zonos 2", _generate_speech_zonos2),
             ("ElevenLabs", _generate_speech_elevenlabs),
@@ -159,7 +163,7 @@ def generate_speech(text, output_path, voice_method=None):
             ("gTTS", _generate_speech_gtts),
         ]
     else:
-        # Default priority sequence
+        # Fallback to default auto behavior for unknown options
         tts_methods = [
             ("Zonos 2", _generate_speech_zonos2),
             ("ElevenLabs", _generate_speech_elevenlabs),
