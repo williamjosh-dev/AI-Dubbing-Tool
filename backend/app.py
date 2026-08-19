@@ -48,6 +48,7 @@ app = FastAPI(title="AI Dubbing API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origin_regex=r"https://[a-zA-Z0-9-]+\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -195,7 +196,7 @@ def run_dubbing_pipeline(
             "isVideo": is_video,
             "sourceLanguage": source_language,
             "targetLanguage": target_language,
-            "voiceMethod": voice_method or "auto",
+            "voiceMethod": "zonos2",
             "outputFormat": output_format,
             "audioUrl": f"/outputs/{dubbed_audio_path.name}",
             "transcriptUrl": f"/outputs/{transcript_path.name}",
@@ -259,11 +260,7 @@ def dub_audio(
     target_language = normalize_language(tgtLang, "es")
     output_format = normalize_output_format(outputFormat)
     enhance_flag = parse_flag(enhanceAudio)
-    voice_method = (voiceMethod or "").strip().lower() or None
-
     warnings = []
-    if parse_flag(voiceClone):
-        warnings.append("Voice cloning is not enabled yet; using the selected TTS engine instead.")
 
     working_audio_path = OUTPUT_DIR / f"{job_id}_input.wav"
     dubbed_audio_path = OUTPUT_DIR / f"{job_id}_dubbed.{output_format}"
@@ -283,7 +280,7 @@ def dub_audio(
         is_video,
         source_language,
         target_language,
-        voice_method,
+        "zonos2",
         output_format,
         enhance_flag,
         warnings,

@@ -15,9 +15,7 @@ from typing import List
 
 from pydub import AudioSegment
 
-from module.transcribe import transcribe_audio
 from module.translate import translate_text
-from module.tts import generate_speech
 
 
 class AudioTranslationPipeline:
@@ -30,6 +28,14 @@ class AudioTranslationPipeline:
 
     def transcribe(self, audio_path: str) -> List[dict]:
         """Transcribe audio into timestamped text segments."""
+        if os.getenv("DUBBING_USE_MODAL_WORKERS") == "1":
+            from modal_app import whisperx_worker
+
+            with open(audio_path, "rb") as source:
+                return whisperx_worker.remote(source.read(), self.src_lang)
+
+        from module.transcribe import transcribe_audio
+
         return transcribe_audio(audio_path, language=self.src_lang)
 
     def translate(self, text: str) -> str:
@@ -38,9 +44,24 @@ class AudioTranslationPipeline:
 
     def synthesize(self, text: str, output_path: str, reference_audio: str | None = None) -> str:
         """Synthesize translated text into an audio file."""
-        # Note: If your module/tts.py supports reference_audio for voice cloning, 
-        # you can pass reference_audio here.
-        return generate_speech(text, output_path, voice_method=self.voice_method)
+        if os.getenv("DUBBING_USE_MODAL_WORKERS") == "1":
+            from modal_app import zonos_worker
+
+            with open(reference_audio, "rb") as reference:
+                generated_audio = zonos_worker.remote(text, reference.read(), self.tgt_lang)
+            with open(output_path, "wb") as output:
+                output.write(generated_audio)
+            return output_path
+
+        from module.tts import generate_speech
+
+        return generate_speech(
+            text,
+            output_path,
+            voice_method=self.voice_method,
+            reference_audio=reference_audio,
+            language=self.tgt_lang,
+        )
 
     def run(
         self,

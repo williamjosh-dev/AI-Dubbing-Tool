@@ -37,11 +37,7 @@ const targetLanguages = [
 ];
 
 const voiceMethods = [
-    { label: 'Auto', value: '' },
-    { label: 'ElevenLabs', value: 'elevenlabs' },
-    { label: 'Google Cloud', value: 'google' },
-    { label: 'Coqui', value: 'coqui' },
-    { label: 'gTTS', value: 'gtts' },
+    { label: 'Zonos 2 voice cloning', value: 'zonos2' },
 ];
 
 const exportFormats = [
