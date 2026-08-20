@@ -7,13 +7,13 @@ import modal
 
 
 ROOT_DIR = Path(__file__).parent
-BACKEND_MOUNT = modal.Mount.from_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
-APP_MOUNT = modal.Mount.from_local_file(ROOT_DIR / "modal_app.py", remote_path="/root/modal_app.py")
 MODEL_VOLUME = modal.Volume.from_name("ai-models-cache", create_if_missing=True)
 MODEL_CACHE_DIR = "/root/model_cache"
 
 cpu_image = (
     modal.Image.debian_slim(python_version="3.11")
+    .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
+    .add_local_file(ROOT_DIR / "modal_app.py", remote_path="/root/modal_app.py")
     .apt_install("ffmpeg")
     .pip_install(
         "fastapi[standard]",
@@ -29,6 +29,8 @@ whisperx_image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11"
     )
+    .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
+    .add_local_file(ROOT_DIR / "modal_app.py", remote_path="/root/modal_app.py")
     .apt_install("ffmpeg")
     .pip_install(
         "torch==2.4.1",
@@ -42,6 +44,7 @@ zonos_image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11"
     )
+    .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
     .apt_install("git", "ffmpeg")
     .pip_install(
         "huggingface_hub[hf_transfer]",
@@ -68,7 +71,6 @@ app = modal.App("ai-dubbing-full-pipeline")
     gpu="T4",
     volumes={MODEL_CACHE_DIR: MODEL_VOLUME},
     timeout=900,
-    mounts=[BACKEND_MOUNT, APP_MOUNT],
 )
 def whisperx_worker(audio_bytes: bytes, language: str) -> list[dict]:
     """Transcribe one audio payload on a T4 worker."""
@@ -87,7 +89,6 @@ def whisperx_worker(audio_bytes: bytes, language: str) -> list[dict]:
     volumes={MODEL_CACHE_DIR: MODEL_VOLUME},
     secrets=[modal.Secret.from_name("my-groq-secret")],
     timeout=900,
-    mounts=[BACKEND_MOUNT],
 )
 def zonos_worker(text: str, reference_audio_bytes: bytes, language: str) -> bytes:
     """Synthesize one translated segment on an L4 worker."""
@@ -113,7 +114,6 @@ def zonos_worker(text: str, reference_audio_bytes: bytes, language: str) -> byte
     image=cpu_image,
     secrets=[modal.Secret.from_name("my-groq-secret")],
     timeout=900,
-    mounts=[BACKEND_MOUNT, APP_MOUNT],
 )
 @modal.asgi_app()
 def fastapi_app():
