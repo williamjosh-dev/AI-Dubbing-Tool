@@ -49,7 +49,7 @@ Nothing here needs a video editing background. If you can drag a file into a bro
 
 At a high level, this is a normal web app: a browser front end talking to a Flask backend, which in turn hands work off to a processing pipeline.
 
-The browser sends the uploaded file to the Flask server. The server checks the file, pulls the audio out if it's a video, and passes it to the pipeline. The pipeline handles transcription, translation, and voice generation, then hands a finished result back to the server, which serves it to the browser for playback and download.
+The browser sends the uploaded file to the Isolated Fastapi server. The server checks the file, pulls the audio out if its a video, and passes it to the pipeline. The pipeline handles transcription, translation, and voice generation, then hands a finished result back to the server, which serves it to the browser for playback and download.
 
 **The core stack:**
 
