@@ -5,11 +5,13 @@ from pathlib import Path
 
 import modal
 
-
 ROOT_DIR = Path(__file__).parent
 MODEL_VOLUME = modal.Volume.from_name("ai-models-cache", create_if_missing=True)
 MODEL_CACHE_DIR = "/root/model_cache"
 
+# ==========================================
+# 1. CPU IMAGE (Orchestration & API)
+# ==========================================
 cpu_image = (
     modal.Image.debian_slim(python_version="3.11")
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
@@ -25,34 +27,44 @@ cpu_image = (
     )
 )
 
+# ==========================================
+# 2. WHISPERX GPU IMAGE (T4 Worker)
+# ==========================================
 whisperx_image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11"
     )
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
     .add_local_file(ROOT_DIR / "modal_app.py", remote_path="/root/modal_app.py")
-    .apt_install("ffmpeg")
+    .apt_install("ffmpeg", "git")
     .pip_install(
         "torch==2.4.1",
         "torchaudio==2.4.1",
-        "whisperx",
+        "git+https://github.com/m-bain/whisperX.git",
         "python-dotenv>=1.0",
     )
 )
 
+# ==========================================
+# 3. ZONOS GPU IMAGE (L4 Worker)
+# ==========================================
 zonos_image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11"
     )
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
-    .apt_install("git", "ffmpeg")
+    # Added espeak-ng (mandatory for phonemization)
+    .apt_install("git", "ffmpeg", "espeak-ng")
     .pip_install(
+        "torch==2.4.1",
+        "torchaudio==2.4.1",
         "huggingface_hub[hf_transfer]",
         "requests",
         "python-dotenv>=1.0",
+        "soundfile",
     )
     .run_commands(
-        "git clone https://github.com/Zyphra/ZONOS2.git /root/Zonos2",
+        "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2",
         "cd /root/Zonos2 && pip install -e .",
     )
     .env(
