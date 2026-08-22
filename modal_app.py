@@ -89,18 +89,24 @@ app = modal.App("ai-dubbing-full-pipeline")
 # -------------------------------------------------------------
 @app.function(image=cpu_image, volumes={STORAGE_DIR: SHARED_VOLUME}, timeout=300)
 def extract_audio_container(job_id: str, video_path: str) -> str:
-    job_dir = os.path.join(STORAGE_DIR, job_id)
-    os.makedirs(job_dir, exist_ok=True)
-    extracted_wav = os.path.join(job_dir, "extracted.wav")
+    try:
+        job_dir = os.path.join(STORAGE_DIR, job_id)
+        os.makedirs(job_dir, exist_ok=True)
+        extracted_wav = os.path.join(job_dir, "extracted.wav")
 
-    cmd = [
-        "ffmpeg", "-y", "-i", video_path,
-        "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
-        extracted_wav
-    ]
-    subprocess.run(cmd, check=True)
-    SHARED_VOLUME.commit()
-    return extracted_wav
+        cmd = [
+            "ffmpeg", "-y", "-i", video_path,
+            "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+            extracted_wav
+        ]
+        result = subprocess.run(cmd, capture_output=True, check=False, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"FFmpeg audio extraction failed: {result.stderr}")
+        SHARED_VOLUME.commit()
+        return extracted_wav
+    except Exception as e:
+        print(f"ERROR [extract_audio_container]: {str(e)}")
+        raise
 
 
 # -------------------------------------------------------------
@@ -114,11 +120,15 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     timeout=600,
 )
 def transcribe_container(audio_path: str, src_lang: str) -> list[dict]:
-    sys.path.insert(0, "/root")
-    from backend.module.transcribe import transcribe_audio
+    try:
+        sys.path.insert(0, "/root")
+        from backend.module.transcribe import transcribe_audio
 
-    # Handles Groq API call with automatic WhisperX local fallback
-    return transcribe_audio(audio_path, language=src_lang)
+        # Handles Groq API call with automatic WhisperX local fallback
+        return transcribe_audio(audio_path, language=src_lang)
+    except Exception as e:
+        print(f"ERROR [transcribe_container]: {str(e)}")
+        raise
 
 
 # -------------------------------------------------------------
@@ -131,17 +141,21 @@ def transcribe_container(audio_path: str, src_lang: str) -> list[dict]:
     timeout=600,
 )
 def synthesize_container(text: str, ref_audio_path: str, out_path: str, tgt_lang: str) -> str:
-    sys.path.insert(0, "/root/backend")
-    from backend.module.tts import generate_speech
+    try:
+        sys.path.insert(0, "/root/backend")
+        from backend.module.tts import generate_speech
 
-    generate_speech(
-        text=text,
-        output_path=out_path,
-        reference_audio=ref_audio_path,
-        language=tgt_lang,
-    )
-    SHARED_VOLUME
-    return out_path
+        generate_speech(
+            text=text,
+            output_path=out_path,
+            reference_audio=ref_audio_path,
+            language=tgt_lang,
+        )
+        SHARED_VOLUME.commit()
+        return out_path
+    except Exception as e:
+        print(f"ERROR [synthesize_container]: {str(e)}")
+        raise
 
 
 # -------------------------------------------------------------
@@ -164,6 +178,16 @@ def assemble_and_finish_container(
 ):
     from pydub import AudioSegment
     import boto3
+    
+    # Validate AWS credentials before proceeding
+    aws_key = os.getenv("AWS_ACCESS_KEY_ID")
+    aws_secret = os.getenv("AWS_SECRET_ACCESS_KEY")
+    bucket_name = os.getenv("S3_BUCKET_NAME")
+    
+    if not aws_key or not aws_secret:
+        raise ValueError("AWS credentials (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) not set")
+    if not bucket_name:
+        raise ValueError("S3_BUCKET_NAME environment variable not set")
 
     job_dir = os.path.join(STORAGE_DIR, job_id)
     final_audio_path = os.path.join(job_dir, "dubbed_timeline.wav")
@@ -193,7 +217,9 @@ def assemble_and_finish_container(
                 "-filter:a", f"atempo={speed_ratio}",
                 stretched_file
             ]
-            subprocess.run(cmd, check=True)
+            result = subprocess.run(cmd, capture_output=True, check=False, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"FFmpeg atempo failed: {result.stderr}")
             processed_clip = AudioSegment.from_file(stretched_file)
         else:
             processed_clip = seg_audio
@@ -212,28 +238,40 @@ def assemble_and_finish_container(
         "-map", "1:a:0",
         final_video_path
     ]
-    subprocess.run(cmd_merge, check=True)
+    result = subprocess.run(cmd_merge, capture_output=True, check=False, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg merge failed: {result.stderr}")
 
     # 3. Upload Output File to S3
     s3_client = boto3.client(
         "s3",
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        aws_access_key_id=aws_key,
+        aws_secret_access_key=aws_secret,
         region_name=os.getenv("AWS_REGION", "us-east-1")
     )
-    bucket_name = os.getenv("S3_BUCKET_NAME")
     s3_key = f"dubbed/{job_id}/output.mp4"
-    s3_client.upload_file(final_video_path, bucket_name, s3_key)
+    try:
+        s3_client.upload_file(final_video_path, bucket_name, s3_key)
+    except Exception as e:
+        raise RuntimeError(f"S3 upload failed: {str(e)}")
 
     s3_url = f"https://{bucket_name}.s3.amazonaws.com/{s3_key}"
 
     # 4. Webhook Ping Back to Vercel
     if webhook_url:
-        requests.post(webhook_url, json={
-            "job_id": job_id,
-            "status": "COMPLETED",
-            "download_url": s3_url
-        })
+        try:
+            requests.post(
+                webhook_url,
+                json={
+                    "job_id": job_id,
+                    "status": "COMPLETED",
+                    "download_url": s3_url
+                },
+                timeout=10
+            )
+        except Exception as e:
+            # Log webhook error but don't fail the job
+            print(f"Warning: Webhook notification failed: {str(e)}")
 
     return s3_url
 

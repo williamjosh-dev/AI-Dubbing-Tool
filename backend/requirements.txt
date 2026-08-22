@@ -4,6 +4,10 @@ uvicorn
 python-multipart
 python-dotenv>=1.0
 
+# Database
+sqlalchemy>=2.0
+psycopg2-binary
+
 # Speech Recognition & Translation
 faster-whisper
 deep-translator

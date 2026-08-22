@@ -5,11 +5,13 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile , BackgroundTasks
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile , BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
 
 from pipeline import AudioTranslationPipeline
+from db import init_db, get_db, Job, SessionLocal
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
@@ -55,6 +57,12 @@ app.add_middleware(
 )
 
 app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
+
+
+@app.on_event("startup")
+def startup_event():
+    """Initialize database on startup."""
+    init_db()
 
 
 def normalize_language(value: str, default: str) -> str:
@@ -150,10 +158,6 @@ def health_check() -> dict:
     return {"ok": True, "ffmpegAvailable": is_ffmpeg_available()}
 
 
-
-JOBS: dict[str, dict] = {}
-
-
 def run_dubbing_pipeline(
     job_id: str,
     source_path: Path,
@@ -169,9 +173,13 @@ def run_dubbing_pipeline(
     enhance_flag: bool,
     warnings: list[str],
 ) -> None:
+    db = SessionLocal()
     try:
         print(f"[{job_id}] Starting dubbing process...")
-        JOBS[job_id]["status"] = "processing"
+        job = db.query(Job).filter(Job.job_id == job_id).first()
+        if job:
+            job.status = "processing"
+            db.commit()
 
         print(f"[{job_id}] Extracting audio...")
         extract_audio(source_path, working_audio_path, enhance_flag)
@@ -191,33 +199,23 @@ def run_dubbing_pipeline(
             save_translated_text=True,
         )
 
-        response = {
-            "jobId": job_id,
-            "isVideo": is_video,
-            "sourceLanguage": source_language,
-            "targetLanguage": target_language,
-            "voiceMethod": "zonos2",
-            "outputFormat": output_format,
-            "audioUrl": f"/outputs/{dubbed_audio_path.name}",
-            "transcriptUrl": f"/outputs/{transcript_path.name}",
-            "translatedText": pipeline_result["translated_text"],
-            "translatedSegments": pipeline_result["translated_segments"],
-            "warnings": warnings,
-        }
-
         if is_video:
             print(f"[{job_id}] Merging audio back into video...")
             replace_audio_in_video(source_path, dubbed_audio_path, dubbed_video_path)
-            response["videoUrl"] = f"/outputs/{dubbed_video_path.name}"
 
-        JOBS[job_id]["status"] = "completed"
-        JOBS[job_id]["result"] = response
+        if job:
+            job.status = "completed"
+            db.commit()
         print(f"[{job_id}] Task completed successfully!")
 
     except Exception as exc:
         print(f"[{job_id}] ERROR: {exc}")
-        JOBS[job_id]["status"] = "failed"
-        JOBS[job_id]["error"] = str(exc)
+        if job:
+            job.status = "failed"
+            job.error = str(exc)
+            db.commit()
+    finally:
+        db.close()
 
 @app.post("/api/dub")
 def dub_audio(
@@ -260,6 +258,7 @@ def dub_audio(
     target_language = normalize_language(tgtLang, "es")
     output_format = normalize_output_format(outputFormat)
     enhance_flag = parse_flag(enhanceAudio)
+    voice_method = voiceMethod if voiceMethod and voiceMethod != "off" else "zonos2"
     warnings = []
 
     working_audio_path = OUTPUT_DIR / f"{job_id}_input.wav"
@@ -267,7 +266,13 @@ def dub_audio(
     transcript_path = OUTPUT_DIR / f"{job_id}_transcript.txt"
     dubbed_video_path = OUTPUT_DIR / f"{job_id}_dubbed.mp4"
 
-    JOBS[job_id] = {"status": "queued"}
+    db = SessionLocal()
+    try:
+        job = Job(job_id=job_id, status="queued")
+        db.add(job)
+        db.commit()
+    finally:
+        db.close()
 
     background_tasks.add_task(
         run_dubbing_pipeline,
@@ -280,7 +285,7 @@ def dub_audio(
         is_video,
         source_language,
         target_language,
-        "zonos2",
+        voice_method,
         output_format,
         enhance_flag,
         warnings,
@@ -291,9 +296,21 @@ def dub_audio(
 
 @app.get("/api/status/{job_id}")
 def get_job_status(job_id: str) -> dict:
-    if job_id not in JOBS:
-        raise HTTPException(status_code=404, detail="Job not found.")
-    return JOBS[job_id]
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.job_id == job_id).first()
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found.")
+        return {
+            "jobId": job.job_id,
+            "status": job.status,
+            "error": job.error,
+            "downloadUrl": job.download_url,
+            "createdAt": job.created_at.isoformat(),
+            "updatedAt": job.updated_at.isoformat(),
+        }
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
