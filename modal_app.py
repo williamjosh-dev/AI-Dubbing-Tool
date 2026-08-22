@@ -21,7 +21,7 @@ cpu_image = (
     modal.Image.debian_slim(python_version="3.11")
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
     .add_local_file(ROOT_DIR / "modal_app.py", remote_path="/root/modal_app.py")
-    .apt_install("ffmpeg")
+    .apt_install("ffmpeg", "libavcodec-extra")
     .pip_install(
         "fastapi[standard]",
         "groq",
@@ -71,7 +71,7 @@ zonos_image = (
     )
     .run_commands(
         "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2",
-        "cd /root/Zonos2 && pip install -e .",
+        "pip install /root/Zonos2",
     )
     .env(
         {
@@ -114,7 +114,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     timeout=600,
 )
 def transcribe_container(audio_path: str, src_lang: str) -> list[dict]:
-    sys.path.insert(0, "/root/backend")
+    sys.path.insert(0, "/root")
     from backend.module.transcribe import transcribe_audio
 
     # Handles Groq API call with automatic WhisperX local fallback
@@ -140,7 +140,7 @@ def synthesize_container(text: str, ref_audio_path: str, out_path: str, tgt_lang
         reference_audio=ref_audio_path,
         language=tgt_lang,
     )
-    SHARED_VOLUME.commit()
+    SHARED_VOLUME
     return out_path
 
 
