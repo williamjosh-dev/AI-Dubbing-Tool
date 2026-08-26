@@ -15,7 +15,7 @@ MODEL_CACHE_DIR = "/root/model_cache"
 STORAGE_DIR = "/root/shared_storage"
 
 # ==========================================
-# 1. CPU IMAGE (Container 1: Orchestration, FFmpeg, S3)
+# 1. CPU IMAGE (Container 1: Orchestration, FFmpeg, Supabase Storage)
 # ==========================================
 cpu_image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -29,7 +29,7 @@ cpu_image = (
         "python-dotenv>=1.0",
         "requests",
         "modal",
-        "boto3",  # For S3 uploads
+        "supabase",
     )
 )
 
@@ -158,14 +158,41 @@ def synthesize_container(text: str, ref_audio_path: str, out_path: str, tgt_lang
         raise
 
 
+@app.function(
+    image=zonos_image,
+    gpu="L4",
+    volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
+    timeout=600,
+)
+def zonos_worker(text: str, reference_audio: bytes | None, tgt_lang: str) -> bytes:
+    """Synthesize one segment for the backend pipeline and return WAV bytes."""
+    sys.path.insert(0, "/root/backend")
+    from backend.module.tts import generate_speech
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        output_path = Path(temp_dir) / "segment.wav"
+        reference_path = None
+        if reference_audio:
+            reference_path = Path(temp_dir) / "reference.wav"
+            reference_path.write_bytes(reference_audio)
+
+        generate_speech(
+            text=text,
+            output_path=str(output_path),
+            reference_audio=str(reference_path) if reference_path else None,
+            language=tgt_lang,
+        )
+        return output_path.read_bytes()
+
+
 # -------------------------------------------------------------
-# STEP 4: Container 1 [CPU] - Time-Stretch, Merge, S3 & Ping
+# STEP 4: Container 1 [CPU] - Time-Stretch, Merge, Supabase Storage & Ping
 # -------------------------------------------------------------
 @app.function(
     image=cpu_image,
     volumes={STORAGE_DIR: SHARED_VOLUME},
     secrets=[
-        modal.Secret.from_name("aws-s3-secrets"),
+        modal.Secret.from_name("supabase-storage-secrets"),
         modal.Secret.from_name("vercel-webhook-secret")
     ],
     timeout=900,
@@ -177,17 +204,8 @@ def assemble_and_finish_container(
     webhook_url: str
 ):
     from pydub import AudioSegment
-    import boto3
-    
-    # Validate AWS credentials before proceeding
-    aws_key = os.getenv("AWS_ACCESS_KEY_ID")
-    aws_secret = os.getenv("AWS_SECRET_ACCESS_KEY")
-    bucket_name = os.getenv("S3_BUCKET_NAME")
-    
-    if not aws_key or not aws_secret:
-        raise ValueError("AWS credentials (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) not set")
-    if not bucket_name:
-        raise ValueError("S3_BUCKET_NAME environment variable not set")
+    sys.path.insert(0, "/root")
+    from backend.storage import upload_public_file
 
     job_dir = os.path.join(STORAGE_DIR, job_id)
     final_audio_path = os.path.join(job_dir, "dubbed_timeline.wav")
@@ -242,20 +260,11 @@ def assemble_and_finish_container(
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg merge failed: {result.stderr}")
 
-    # 3. Upload Output File to S3
-    s3_client = boto3.client(
-        "s3",
-        aws_access_key_id=aws_key,
-        aws_secret_access_key=aws_secret,
-        region_name=os.getenv("AWS_REGION", "us-east-1")
-    )
-    s3_key = f"dubbed/{job_id}/output.mp4"
+    # 3. Upload the final output to public Supabase Storage.
     try:
-        s3_client.upload_file(final_video_path, bucket_name, s3_key)
+        public_url = upload_public_file(Path(final_video_path), job_id, "video")
     except Exception as e:
-        raise RuntimeError(f"S3 upload failed: {str(e)}")
-
-    s3_url = f"https://{bucket_name}.s3.amazonaws.com/{s3_key}"
+        raise RuntimeError(f"Supabase Storage upload failed: {str(e)}")
 
     # 4. Webhook Ping Back to Vercel
     if webhook_url:
@@ -265,7 +274,7 @@ def assemble_and_finish_container(
                 json={
                     "job_id": job_id,
                     "status": "COMPLETED",
-                    "download_url": s3_url
+                    "download_url": public_url
                 },
                 timeout=10
             )
@@ -273,7 +282,27 @@ def assemble_and_finish_container(
             # Log webhook error but don't fail the job
             print(f"Warning: Webhook notification failed: {str(e)}")
 
-    return s3_url
+    return public_url
+
+
+def call_assemble_and_finish(
+    job_id: str,
+    original_video_path: str,
+    translated_segments: list[dict],
+    webhook_url: str = "",
+) -> str:
+    """Call the Modal assembler for files stored on the shared Modal volume."""
+    if not Path(original_video_path).is_file():
+        raise FileNotFoundError(f"Original video not found: {original_video_path}")
+    if not translated_segments:
+        raise ValueError("At least one translated segment is required.")
+
+    return assemble_and_finish_container.remote(
+        job_id,
+        original_video_path,
+        translated_segments,
+        webhook_url,
+    )
 
 
 # -------------------------------------------------------------
