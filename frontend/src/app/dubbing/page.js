@@ -65,6 +65,7 @@ const quickStats = [
 
 function buildMediaUrl(path) {
     if (!path) return '';
+    if (/^https?:\/\//i.test(path)) return path;
     return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
 }
 

@@ -18,6 +18,9 @@ class Job(Base):
     status = Column(String(50), default="queued")
     error = Column(String(500), nullable=True)
     download_url = Column(String(500), nullable=True)
+    audio_url = Column(String(500), nullable=True)
+    video_url = Column(String(500), nullable=True)
+    transcript_url = Column(String(500), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

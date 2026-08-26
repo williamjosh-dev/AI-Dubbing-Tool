@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from pipeline import AudioTranslationPipeline
 from db import init_db, get_db, Job, SessionLocal
+from storage import upload_public_file
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
@@ -174,6 +175,7 @@ def run_dubbing_pipeline(
     warnings: list[str],
 ) -> None:
     db = SessionLocal()
+    job = None
     try:
         print(f"[{job_id}] Starting dubbing process...")
         job = db.query(Job).filter(Job.job_id == job_id).first()
@@ -204,6 +206,13 @@ def run_dubbing_pipeline(
             replace_audio_in_video(source_path, dubbed_audio_path, dubbed_video_path)
 
         if job:
+            audio_url = upload_public_file(dubbed_audio_path, job_id, "audio")
+            transcript_url = upload_public_file(transcript_path, job_id, "transcript")
+            video_url = upload_public_file(dubbed_video_path, job_id, "video") if is_video else None
+            job.audio_url = audio_url
+            job.video_url = video_url
+            job.transcript_url = transcript_url
+            job.download_url = video_url or audio_url
             job.status = "completed"
             db.commit()
         print(f"[{job_id}] Task completed successfully!")
@@ -306,6 +315,11 @@ def get_job_status(job_id: str) -> dict:
             "status": job.status,
             "error": job.error,
             "downloadUrl": job.download_url,
+            "result": {
+                "audioUrl": job.audio_url,
+                "videoUrl": job.video_url,
+                "transcriptUrl": job.transcript_url,
+            } if job.status == "completed" else None,
             "createdAt": job.created_at.isoformat(),
             "updatedAt": job.updated_at.isoformat(),
         }
