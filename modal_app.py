@@ -30,6 +30,8 @@ cpu_image = (
         "requests",
         "modal",
         "supabase",
+        "sqlalchemy>=2.0",
+        "psycopg2-binary",
     )
 )
 
@@ -116,7 +118,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     image=whisperx_image,
     gpu="T4",
     volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
-    secrets=[modal.Secret.from_name("my-groq-secret")],
+    secrets=[modal.Secret.from_name("my-repo-secrets")],
     timeout=600,
 )
 def transcribe_container(audio_path: str, src_lang: str) -> list[dict]:
@@ -191,10 +193,7 @@ def zonos_worker(text: str, reference_audio: bytes | None, tgt_lang: str) -> byt
 @app.function(
     image=cpu_image,
     volumes={STORAGE_DIR: SHARED_VOLUME},
-    secrets=[
-        modal.Secret.from_name("supabase-storage-secrets"),
-        modal.Secret.from_name("vercel-webhook-secret")
-    ],
+    secrets=[modal.Secret.from_name("my-repo-secrets")],
     timeout=900,
 )
 def assemble_and_finish_container(
@@ -311,7 +310,7 @@ def call_assemble_and_finish(
 @app.function(
     image=cpu_image,
     volumes={STORAGE_DIR: SHARED_VOLUME},
-    secrets=[modal.Secret.from_name("my-groq-secret")],
+    secrets=[modal.Secret.from_name("my-repo-secrets")],
     timeout=900,
 )
 @modal.asgi_app()
