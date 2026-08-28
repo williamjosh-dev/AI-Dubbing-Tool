@@ -252,7 +252,12 @@ def dub_audio(
     job_id = uuid.uuid4().hex[:12]
     original_ext = audioFile.filename.rsplit(".", 1)[1].lower()
     safe_stem = Path(audioFile.filename).stem.replace(" ", "_")
-    source_path = UPLOAD_DIR / f"{job_id}_{safe_stem}.{original_ext}"
+    modal_pipeline = os.getenv("MODAL_PIPELINE") == "1"
+    if modal_pipeline:
+        source_path = Path("/root/shared_storage") / job_id / f"source.{original_ext}"
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        source_path = UPLOAD_DIR / f"{job_id}_{safe_stem}.{original_ext}"
 
     with source_path.open("wb") as buffer:
         shutil.copyfileobj(audioFile.file, buffer)
@@ -283,22 +288,36 @@ def dub_audio(
     finally:
         db.close()
 
-    background_tasks.add_task(
-        run_dubbing_pipeline,
-        job_id,
-        source_path,
-        working_audio_path,
-        dubbed_audio_path,
-        transcript_path,
-        dubbed_video_path,
-        is_video,
-        source_language,
-        target_language,
-        voice_method,
-        output_format,
-        enhance_flag,
-        warnings,
-    )
+    if modal_pipeline:
+        from modal_app import SHARED_VOLUME, run_modal_job
+
+        SHARED_VOLUME.commit()
+        run_modal_job.spawn(
+            job_id,
+            str(source_path),
+            is_video,
+            source_language,
+            target_language,
+            output_format,
+            enhance_flag,
+        )
+    else:
+        background_tasks.add_task(
+            run_dubbing_pipeline,
+            job_id,
+            source_path,
+            working_audio_path,
+            dubbed_audio_path,
+            transcript_path,
+            dubbed_video_path,
+            is_video,
+            source_language,
+            target_language,
+            voice_method,
+            output_format,
+            enhance_flag,
+            warnings,
+        )
 
     return {"jobId": job_id, "status": "queued"}
 
