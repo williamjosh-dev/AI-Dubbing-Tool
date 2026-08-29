@@ -24,6 +24,7 @@ cpu_image = (
         "fastapi[standard]",
         "groq",
         "numpy",
+        "protobuf<5",
         "pydub",
         "python-dotenv>=1.0",
         "requests",
@@ -50,6 +51,7 @@ whisperx_image = (
         "torchaudio==2.8.0",
         "git+https://github.com/m-bain/whisperX.git",
         "groq",
+        "protobuf<5",
         "python-dotenv>=1.0",
     )
     .env(
@@ -75,6 +77,7 @@ zonos_image = (
         "torchaudio==2.9.1",
         "huggingface_hub",
         "requests",
+        "protobuf<5",
         "python-dotenv>=1.0",
         "soundfile",
         "msgpack",
