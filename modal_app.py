@@ -35,7 +35,7 @@ cpu_image = (
         "deep-translator",
     )
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
-    .add_local_file(ROOT_DIR / "modal_app.py", remote_path="/root/modal_app.py")
+    # REMOVED: .add_local_file(...) self-reference
 )
 
 # ==========================================
@@ -47,8 +47,8 @@ whisperx_image = (
     )
     .apt_install("ffmpeg", "git")
     .pip_install(
-        "torch==2.8.0",
-        "torchaudio==2.8.0",
+        "torch==2.4.0",
+        "torchaudio==2.4.0",
         "git+https://github.com/m-bain/whisperX.git",
         "groq",
         "protobuf<5",
@@ -61,7 +61,7 @@ whisperx_image = (
         }
     )
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
-    .add_local_file(ROOT_DIR / "modal_app.py", remote_path="/root/modal_app.py")
+    # REMOVED: .add_local_file(...) self-reference
 )
 
 # ==========================================
@@ -71,34 +71,27 @@ zonos_image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11"
     )
-    .apt_install("git", "ffmpeg", "espeak-ng")
+    # Added openfst-dev and libfst-dev required by pynini
+    .apt_install("git", "ffmpeg", "espeak-ng", "openfst-tools", "libfst-dev")
     .pip_install(
-        "torch==2.9.1",
-        "torchaudio==2.9.1",
+        "torch==2.4.0",
+        "torchaudio==2.4.0",
         "huggingface_hub",
         "requests",
         "protobuf<5",
         "python-dotenv>=1.0",
         "soundfile",
         "msgpack",
-        "sgl_kernel>=0.3.17.post1",
         "descript-audio-codec==1.0.0",
-        "transformers>=4.56.0,<=4.57.3",
+        "transformers>=4.40.0",
         "pyzmq",
         "uvicorn",
         "fastapi",
-        "apache-tvm-ffi>=0.1.4",
-        "nvidia-cutlass-dsl==4.3.1",
-        "flashinfer-cubin==0.5.3",
-        "flashinfer-python>=0.5.3",
-        "ninja>=1.13.0",
-        "kernels>=0.12.1",
-        "pynini==2.1.6",
+        "ninja>=1.11.0",
         "sacremoses>=0.1.1",
     )
     .run_commands(
         "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2",
-        "pip install https://github.com/flashinfer-ai/flashinfer/releases/download/v0.5.3/flashinfer_jit_cache-0.5.3+cu128-cp39-abi3-manylinux_2_28_x86_64.whl",
         "pip install --no-deps /root/Zonos2",
     )
     .env(
