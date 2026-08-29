@@ -1,6 +1,5 @@
 import os
 import sys
-import tempfile
 import subprocess
 import requests
 from pathlib import Path
@@ -13,6 +12,7 @@ SHARED_VOLUME = modal.Volume.from_name("dubbing-shared-storage", create_if_missi
 
 MODEL_CACHE_DIR = "/root/model_cache"
 STORAGE_DIR = "/root/shared_storage"
+MAX_SYNTHESIS_BATCH_SIZE = 4
 
 # ==========================================
 # 1. CPU IMAGE (Container 1: Orchestration, FFmpeg, Supabase Storage)
@@ -39,47 +39,23 @@ cpu_image = (
 )
 
 # ==========================================
-# 2. WHISPERX GPU IMAGE (Container 2: T4 Worker)
+# 2. L4 IMAGE (WhisperX + Zonos2 in one GPU container)
 # ==========================================
-whisperx_image = (
+l4_image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11"
     )
     .apt_install("ffmpeg", "git")
     .pip_install(
-        "torch==2.4.0",
-        "torchaudio==2.4.0",
+        "torch==2.8.0",
+        "torchaudio==2.8.0",
         "git+https://github.com/m-bain/whisperX.git",
         "groq",
+        "numpy",
         "protobuf<5",
         "python-dotenv>=1.0",
-    )
-    .env(
-        {
-            "HF_HOME": f"{MODEL_CACHE_DIR}/huggingface",
-            "XDG_CACHE_HOME": f"{MODEL_CACHE_DIR}/cache",
-        }
-    )
-    .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
-    # REMOVED: .add_local_file(...) self-reference
-)
-
-# ==========================================
-# 3. ZONOS GPU IMAGE (Container 3: L4 Worker)
-# ==========================================
-zonos_image = (
-    modal.Image.from_registry(
-        "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11"
-    )
-    # Added openfst-dev and libfst-dev required by pynini
-    .apt_install("git", "ffmpeg", "espeak-ng", "openfst-tools", "libfst-dev")
-    .pip_install(
-        "torch==2.4.0",
-        "torchaudio==2.4.0",
         "huggingface_hub",
         "requests",
-        "protobuf<5",
-        "python-dotenv>=1.0",
         "soundfile",
         "msgpack",
         "descript-audio-codec==1.0.0",
@@ -90,6 +66,13 @@ zonos_image = (
         "ninja>=1.11.0",
         "sacremoses>=0.1.1",
     )
+    .env(
+        {
+            "HF_HOME": f"{MODEL_CACHE_DIR}/huggingface",
+            "XDG_CACHE_HOME": f"{MODEL_CACHE_DIR}/cache",
+        }
+    )
+    .apt_install("espeak-ng", "libfst-dev")
     .run_commands(
         "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2",
         "pip install --no-deps /root/Zonos2",
@@ -102,7 +85,6 @@ zonos_image = (
     )
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
 )
-
 app = modal.App("ai-dubbing-full-pipeline")
 
 
@@ -132,11 +114,12 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
 
 
 # -------------------------------------------------------------
-# STEP 2: Container 2 [T4 GPU] - WhisperX / Groq API Call
+# STEP 2: Container 2 [L4 GPU] - WhisperX / Groq API Call
 # -------------------------------------------------------------
 @app.function(
-    image=whisperx_image,
-    gpu="T4",
+    image=l4_image,
+    gpu="L4",
+    max_containers=1,
     volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
     timeout=600,
@@ -156,59 +139,37 @@ def transcribe_container(audio_path: str, src_lang: str) -> list[dict]:
 
 
 # -------------------------------------------------------------
-# STEP 3: Container 3 [L4 GPU] - Zonos-v2 Voice Cloning
+# STEP 3: Single L4 GPU - Batched Zonos-v2 Voice Cloning
 # -------------------------------------------------------------
 @app.function(
-    image=zonos_image,
+    image=l4_image,
     gpu="L4",
+    max_containers=1,
     volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     timeout=600,
 )
-def synthesize_container(text: str, ref_audio_path: str, out_path: str, tgt_lang: str) -> str:
+def synthesize_segments_container(
+    segments: list[dict], tgt_lang: str
+) -> list[str]:
     try:
         sys.path.insert(0, "/root/backend")
         from backend.module.tts import generate_speech
 
-        generate_speech(
-            text=text,
-            output_path=out_path,
-            reference_audio=ref_audio_path,
-            language=tgt_lang,
-        )
+        generated_paths = []
+        for segment in segments:
+            generate_speech(
+                text=segment["text"],
+                output_path=segment["out_path"],
+                reference_audio=segment["ref_path"],
+                language=tgt_lang,
+            )
+            generated_paths.append(segment["out_path"])
         MODEL_VOLUME.commit()
         SHARED_VOLUME.commit()
-        return out_path
+        return generated_paths
     except Exception as e:
-        print(f"ERROR [synthesize_container]: {str(e)}")
+        print(f"ERROR [synthesize_segments_container]: {str(e)}")
         raise
-
-
-@app.function(
-    image=zonos_image,
-    gpu="L4",
-    volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
-    timeout=600,
-)
-def zonos_worker(text: str, reference_audio: bytes | None, tgt_lang: str) -> bytes:
-    """Synthesize one segment for the backend pipeline and return WAV bytes."""
-    sys.path.insert(0, "/root/backend")
-    from backend.module.tts import generate_speech
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        output_path = Path(temp_dir) / "segment.wav"
-        reference_path = None
-        if reference_audio:
-            reference_path = Path(temp_dir) / "reference.wav"
-            reference_path.write_bytes(reference_audio)
-
-        generate_speech(
-            text=text,
-            output_path=str(output_path),
-            reference_audio=str(reference_path) if reference_path else None,
-            language=tgt_lang,
-        )
-        MODEL_VOLUME.commit()
-        return output_path.read_bytes()
 
 
 # -------------------------------------------------------------
@@ -392,6 +353,7 @@ def run_modal_job(
             ),
             encoding="utf-8",
         )
+        synthesis_segments = []
         for index, segment in enumerate(translated_segments):
             translated_text = segment.get("translated", "").strip()
             if not translated_text:
@@ -401,18 +363,18 @@ def run_modal_job(
             source_audio[start_ms:end_ms].export(
                 job_dir / f"ref_{index}.wav", format="wav"
             )
+            synthesis_segments.append({
+                "text": translated_text,
+                "ref_path": str(job_dir / f"ref_{index}.wav"),
+                "out_path": str(job_dir / f"raw_seg_{index}.wav"),
+            })
         SHARED_VOLUME.commit()
 
-        for index, segment in enumerate(translated_segments):
-            translated_text = segment.get("translated", "").strip()
-            if not translated_text:
-                continue
-            synthesize_container.remote(
-                translated_text,
-                str(job_dir / f"ref_{index}.wav"),
-                str(job_dir / f"raw_seg_{index}.wav"),
-                target_language,
-            )
+        for batch_start in range(0, len(synthesis_segments), MAX_SYNTHESIS_BATCH_SIZE):
+            batch = synthesis_segments[
+                batch_start:batch_start + MAX_SYNTHESIS_BATCH_SIZE
+            ]
+            synthesize_segments_container.remote(batch, target_language)
             SHARED_VOLUME.reload()
 
         result = assemble_and_finish_container.remote(

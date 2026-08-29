@@ -37,19 +37,6 @@ class AudioTranslationPipeline:
 
     def synthesize(self, text: str, output_path: str, reference_audio: str | None = None) -> str:
         """Synthesize translated text into an audio file."""
-        if os.getenv("DUBBING_USE_MODAL_WORKERS") == "1":
-            from modal_app import zonos_worker
-
-            ref_bytes = None
-            if reference_audio and os.path.exists(reference_audio):
-                with open(reference_audio, "rb") as ref_file:
-                    ref_bytes = ref_file.read()
-
-            generated_audio = zonos_worker.remote(text, ref_bytes, self.tgt_lang)
-            with open(output_path, "wb") as output:
-                output.write(generated_audio)
-            return output_path
-
         from module.tts import generate_speech
 
         return generate_speech(
