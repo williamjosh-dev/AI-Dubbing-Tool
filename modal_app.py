@@ -23,6 +23,7 @@ cpu_image = (
     .pip_install(
         "fastapi[standard]",
         "groq",
+        "numpy",
         "pydub",
         "python-dotenv>=1.0",
         "requests",
@@ -360,6 +361,7 @@ def run_modal_job(
     """Run the complete CPU -> T4 -> L4 -> CPU job graph."""
     from pydub import AudioSegment
     from backend.db import Job, SessionLocal
+    from backend.storage import upload_public_file
     from backend.module.translate import translate_text
 
     job_dir = Path(STORAGE_DIR) / job_id

@@ -138,8 +138,8 @@ def transcribe_audio(audio_path, language="es", enable_alignment=True):
             continue
 
         seg_data = {
-            "start": round(segment.get("start", 0.0), 3),
-            "end": round(segment.get("end", 0.0), 3),
+            "start": float(round(segment.get("start", 0.0), 3)),
+            "end": float(round(segment.get("end", 0.0), 3)),
             "text": text,
         }
 
@@ -147,9 +147,9 @@ def transcribe_audio(audio_path, language="es", enable_alignment=True):
             seg_data["words"] = [
                 {
                     "word": w.get("word"),
-                    "start": w.get("start"),
-                    "end": w.get("end"),
-                    "score": w.get("score", 1.0)
+                    "start": float(w["start"]) if w.get("start") is not None else None,
+                    "end": float(w["end"]) if w.get("end") is not None else None,
+                    "score": float(w.get("score", 1.0)),
                 }
                 for w in segment["words"]
                 if "word" in w
