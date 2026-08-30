@@ -29,6 +29,7 @@ const sourceLanguages = [
 ];
 
 const targetLanguages = [
+    { label: 'English', value: 'en' },
     { label: 'Spanish', value: 'es' },
     { label: 'French', value: 'fr' },
     { label: 'Arabic', value: 'ar' },
