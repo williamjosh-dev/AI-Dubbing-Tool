@@ -12,7 +12,6 @@ SHARED_VOLUME = modal.Volume.from_name("dubbing-shared-storage", create_if_missi
 
 MODEL_CACHE_DIR = "/root/model_cache"
 STORAGE_DIR = "/root/shared_storage"
-MAX_SYNTHESIS_BATCH_SIZE = 4
 
 # ==========================================
 # 1. CPU IMAGE (Container 1: Orchestration, FFmpeg, Supabase Storage)
@@ -47,22 +46,25 @@ l4_image = (
     )
     .apt_install("ffmpeg", "git")
     .pip_install(
-        "torch==2.8.0",
-        "torchaudio==2.8.0",
-        "git+https://github.com/m-bain/whisperX.git",
+        "torch==2.9.1",
+        "torchaudio==2.9.1",
+        "torchvision==0.24.1",
+        "ctranslate2>=4.5.0",
+        "nltk>=3.9.1",
+        "omegaconf>=2.3.0",
+        "pandas>=2.2.3",
+        "pyannote-audio>=4.0.0",
+        "torchcodec>=0.6.0,<0.8.0",
+        "triton>=3.3.0",
         "groq",
         "numpy",
-        "protobuf<5",
+        "protobuf>=4.25.8,<5",
         "python-dotenv>=1.0",
         "huggingface_hub",
-        "requests",
+        "pydub",
         "soundfile",
         "msgpack",
-        "descript-audio-codec==1.0.0",
-        "transformers>=4.40.0",
-        "pyzmq",
-        "uvicorn",
-        "fastapi",
+        "transformers>=4.56.0,<=4.57.3",
         "ninja>=1.11.0",
         "sacremoses>=0.1.1",
     )
@@ -75,7 +77,10 @@ l4_image = (
     .apt_install("espeak-ng", "libfst-dev")
     .run_commands(
         "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2",
-        "pip install --no-deps /root/Zonos2",
+        "pip install --no-deps descript-audio-codec==1.0.0",
+        "pip install /root/Zonos2 --no-deps",
+        "pip install faster-whisper==1.2.0",
+        "pip install --no-deps git+https://github.com/m-bain/whisperX.git",
     )
     .env(
         {
@@ -114,7 +119,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
 
 
 # -------------------------------------------------------------
-# STEP 2: Container 2 [L4 GPU] - WhisperX / Groq API Call
+# STEP 2: Single L4 GPU - WhisperX -> Groq -> Zonos, sequentially
 # -------------------------------------------------------------
 @app.function(
     image=l4_image,
@@ -122,58 +127,73 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     max_containers=1,
     volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
-    timeout=600,
+    timeout=1800,
 )
-def transcribe_container(audio_path: str, src_lang: str) -> list[dict]:
+def process_gpu_pipeline(
+    audio_path: str,
+    job_id: str,
+    src_lang: str,
+    tgt_lang: str,
+) -> list[dict]:
+    """Run transcription, translation, and voice cloning in one L4 worker."""
     try:
+        from pydub import AudioSegment
+
         sys.path.insert(0, "/root")
-        from backend.module.transcribe import transcribe_audio
-
-        # Handles Groq API call with automatic WhisperX local fallback
-        result = transcribe_audio(audio_path, language=src_lang)
-        MODEL_VOLUME.commit()
-        return result
-    except Exception as e:
-        print(f"ERROR [transcribe_container]: {str(e)}")
-        raise
-
-
-# -------------------------------------------------------------
-# STEP 3: Single L4 GPU - Batched Zonos-v2 Voice Cloning
-# -------------------------------------------------------------
-@app.function(
-    image=l4_image,
-    gpu="L4",
-    max_containers=1,
-    volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
-    timeout=600,
-)
-def synthesize_segments_container(
-    segments: list[dict], tgt_lang: str
-) -> list[str]:
-    try:
-        sys.path.insert(0, "/root/backend")
+        from backend.module.transcribe import transcribe_audio_whisperx_full
+        from backend.module.translate import translate_text
         from backend.module.tts import generate_speech
 
-        generated_paths = []
+        print(f"[{job_id}] 1/3 WhisperX transcription and alignment")
+        segments = transcribe_audio_whisperx_full(
+            audio_path,
+            src_lang,
+            device="cuda",
+            compute_type=os.getenv("WHISPER_COMPUTE_TYPE", "float16"),
+            batch_size=int(os.getenv("WHISPER_BATCH_SIZE", "16")),
+        )
+        if not segments:
+            raise RuntimeError("WhisperX returned no speech segments")
+
+        print(f"[{job_id}] 2/3 Groq translation ({len(segments)} segments)")
+        translated_segments = []
         for segment in segments:
+            text = segment.get("text", "").strip()
+            translated_segments.append({
+                **segment,
+                "translated": translate_text(text, src_lang, tgt_lang),
+            })
+
+        print(f"[{job_id}] 3/3 Zonos voice cloning ({len(translated_segments)} segments)")
+        source_audio = AudioSegment.from_file(audio_path)
+        job_dir = Path(STORAGE_DIR) / job_id
+        for index, segment in enumerate(translated_segments):
+            translated_text = segment.get("translated", "").strip()
+            if not translated_text:
+                continue
+
+            start_ms = max(0, int(segment.get("start", 0) * 1000))
+            end_ms = max(start_ms + 100, int(segment.get("end", 0) * 1000))
+            reference_path = job_dir / f"ref_{index}.wav"
+            output_path = job_dir / f"raw_seg_{index}.wav"
+            source_audio[start_ms:end_ms].export(reference_path, format="wav")
             generate_speech(
-                text=segment["text"],
-                output_path=segment["out_path"],
-                reference_audio=segment["ref_path"],
+                text=translated_text,
+                output_path=str(output_path),
+                reference_audio=str(reference_path),
                 language=tgt_lang,
             )
-            generated_paths.append(segment["out_path"])
+
         MODEL_VOLUME.commit()
         SHARED_VOLUME.commit()
-        return generated_paths
+        return translated_segments
     except Exception as e:
-        print(f"ERROR [synthesize_segments_container]: {str(e)}")
+        print(f"ERROR [process_gpu_pipeline]: {str(e)}")
         raise
 
 
 # -------------------------------------------------------------
-# STEP 4: Container 1 [CPU] - Time-Stretch, Merge, Supabase Storage & Ping
+# STEP 3: Container 1 [CPU] - Time-Stretch, Merge, Supabase Storage & Ping
 # -------------------------------------------------------------
 @app.function(
     image=cpu_image,
@@ -315,11 +335,9 @@ def run_modal_job(
     output_format: str,
     enhance_audio: bool,
 ) -> dict:
-    """Run the complete CPU -> T4 -> L4 -> CPU job graph."""
-    from pydub import AudioSegment
+    """Run CPU file handling around one sequential L4 model worker."""
     from backend.db import Job, SessionLocal
     from backend.storage import upload_public_file
-    from backend.module.translate import translate_text
 
     job_dir = Path(STORAGE_DIR) / job_id
     SHARED_VOLUME.reload()
@@ -334,15 +352,12 @@ def run_modal_job(
         db.commit()
         working_audio_path = extract_audio_container.remote(job_id, source_path)
         SHARED_VOLUME.reload()
-        segments = transcribe_container.remote(working_audio_path, source_language)
-        source_audio = AudioSegment.from_file(working_audio_path)
-        translated_segments = []
-        for segment in segments:
-            text = segment.get("text", "").strip()
-            translated_segments.append({
-                **segment,
-                "translated": translate_text(text, source_language, target_language),
-            })
+        translated_segments = process_gpu_pipeline.remote(
+            working_audio_path,
+            job_id,
+            source_language,
+            target_language,
+        )
 
         transcript_path = job_dir / f"{job_id}_transcript.txt"
         transcript_path.write_text(
@@ -353,29 +368,7 @@ def run_modal_job(
             ),
             encoding="utf-8",
         )
-        synthesis_segments = []
-        for index, segment in enumerate(translated_segments):
-            translated_text = segment.get("translated", "").strip()
-            if not translated_text:
-                continue
-            start_ms = max(0, int(segment.get("start", 0) * 1000))
-            end_ms = max(start_ms + 100, int(segment.get("end", 0) * 1000))
-            source_audio[start_ms:end_ms].export(
-                job_dir / f"ref_{index}.wav", format="wav"
-            )
-            synthesis_segments.append({
-                "text": translated_text,
-                "ref_path": str(job_dir / f"ref_{index}.wav"),
-                "out_path": str(job_dir / f"raw_seg_{index}.wav"),
-            })
-        SHARED_VOLUME.commit()
-
-        for batch_start in range(0, len(synthesis_segments), MAX_SYNTHESIS_BATCH_SIZE):
-            batch = synthesis_segments[
-                batch_start:batch_start + MAX_SYNTHESIS_BATCH_SIZE
-            ]
-            synthesize_segments_container.remote(batch, target_language)
-            SHARED_VOLUME.reload()
+        SHARED_VOLUME.reload()
 
         result = assemble_and_finish_container.remote(
             job_id, source_path, translated_segments, "", is_video, output_format
