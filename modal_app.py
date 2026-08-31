@@ -1,10 +1,11 @@
+import gc
 import os
-import sys
 import subprocess
-import requests
+import sys
 from pathlib import Path
 
 import modal
+import requests
 
 ROOT_DIR = Path(__file__).parent
 MODEL_VOLUME = modal.Volume.from_name("ai-models-cache", create_if_missing=True)
@@ -22,7 +23,7 @@ cpu_image = (
     .pip_install(
         "fastapi[standard]",
         "groq",
-        "numpy",
+        "numpy<2.0.0",
         "protobuf>=5.0.0",
         "pydub",
         "python-dotenv>=1.0",
@@ -37,8 +38,16 @@ cpu_image = (
 )
 
 # ==========================================
-# 2. L4 GPU IMAGE (WhisperX + Zonos2 Container)
+# 2. L4 GPU IMAGE (WhisperX + Zonos2 + Demucs Container)
 # ==========================================
+def download_demucs_weights():
+    import torch
+    from demucs.pretrained import get_model
+
+    print("Pre-downloading Demucs model weights during image build...")
+    get_model("htdemucs")
+
+
 l4_image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11"
@@ -59,7 +68,6 @@ l4_image = (
         "huggingface_hub",
         "soundfile",
         "pydub",
-        "numpy<2.0.0",
         "pyannote.audio>=3.1.1",
         "omegaconf>=2.3.0",
         "pandas>=2.2.0",
@@ -69,17 +77,21 @@ l4_image = (
         "python-dotenv>=1.0",
         "msgpack",
         "ninja>=1.11.0",
-        "sacremoses>=0.1.1"
+        "sacremoses>=0.1.1",
+        "demucs",
     )
     .run_commands(
         "pip install --no-deps git+https://github.com/m-bain/whisperX.git",
         "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2",
         "pip install --no-deps descript-audio-codec==1.0.0",
-        "pip install /root/Zonos2 --no-deps"
+        "pip install /root/Zonos2 --no-deps",
+        "pip install 'numpy<2.0.0' --force-reinstall"  # Enforce NumPy 1.x compatibility final step
     )
+    .run_function(download_demucs_weights)
     .env(
         {
             "HF_HOME": f"{MODEL_CACHE_DIR}/huggingface",
+            "TORCH_HOME": f"{MODEL_CACHE_DIR}/torch",
             "XDG_CACHE_HOME": f"{MODEL_CACHE_DIR}/cache",
             "HF_HUB_ENABLE_HF_TRANSFER": "1",
             "WHISPER_MODEL": "large-v3",
@@ -113,7 +125,6 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
         if result.returncode != 0:
             raise RuntimeError(f"FFmpeg audio extraction failed: {result.stderr}")
         
-        # Explicit Commit to ensure L4 GPU container can read extracted.wav
         SHARED_VOLUME.commit()
         return extracted_wav
     except Exception as e:
@@ -122,7 +133,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
 
 
 # -------------------------------------------------------------
-# STEP 2: L4 GPU Worker - Transcription, Translation, TTS
+# STEP 2: L4 GPU Worker - Demucs Separation, Transcription, Translation, TTS
 # -------------------------------------------------------------
 @app.function(
     image=l4_image,
@@ -137,24 +148,65 @@ def process_gpu_pipeline(
     job_id: str,
     src_lang: str,
     tgt_lang: str,
+    separate_stems: bool = True,
 ) -> list[dict]:
     try:
+        import torch
         from pydub import AudioSegment
 
-        # Sync Shared Storage to access extracted.wav from Container 1
         SHARED_VOLUME.reload()
 
         if "/root" not in sys.path:
             sys.path.insert(0, "/root")
 
+        from backend.demucs_service import DemucsBackend
         from backend.module.transcribe import transcribe_audio_whisperx_full
         from backend.module.translate import translate_text
         from backend.module.tts import generate_speech
 
+        job_dir = Path(STORAGE_DIR) / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        vocals_path = str(job_dir / "isolated_vocals.wav")
+        background_path = str(job_dir / "background_track.wav")
+        target_transcription_audio = audio_path
+
+        # -------------------------------------------------------------
+        # 0/3 Demucs Source Separation
+        # -------------------------------------------------------------
+        if separate_stems:
+            print(f"[{job_id}] 0/3 Running Demucs Audio Separation (htdemucs)")
+            demucs_worker = DemucsBackend(model_name="htdemucs", device="cuda")
+            
+            with open(audio_path, "rb") as f:
+                raw_audio_bytes = f.read()
+
+            stems = demucs_worker.separate_stems(
+                raw_audio_bytes, stems=["vocals", "no_vocals"]
+            )
+
+            with open(vocals_path, "wb") as f:
+                f.write(stems["vocals"])
+            with open(background_path, "wb") as f:
+                f.write(stems["no_vocals"])
+
+            target_transcription_audio = vocals_path
+            
+            # Explicit volume commit so background track is available downstream
+            SHARED_VOLUME.commit()
+            
+            # Clean VRAM after Demucs pass
+            del demucs_worker
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        # -------------------------------------------------------------
+        # 1/3 WhisperX transcription & alignment
+        # -------------------------------------------------------------
         print(f"[{job_id}] 1/3 WhisperX transcription & alignment (large-v3)")
         
         segments = transcribe_audio_whisperx_full(
-            audio_path,
+            target_transcription_audio,
             src_lang,
             device="cuda",
             model_name="large-v3",
@@ -164,9 +216,15 @@ def process_gpu_pipeline(
         if not segments:
             raise RuntimeError("WhisperX returned no speech segments")
 
-        # Save downloaded models to volume cache
         MODEL_VOLUME.commit()
+        
+        # Clean VRAM after WhisperX pass
+        gc.collect()
+        torch.cuda.empty_cache()
 
+        # -------------------------------------------------------------
+        # 2/3 Translation
+        # -------------------------------------------------------------
         print(f"[{job_id}] 2/3 Translation ({len(segments)} segments)")
         translated_segments = []
         for segment in segments:
@@ -176,10 +234,12 @@ def process_gpu_pipeline(
                 "translated": translate_text(text, src_lang, tgt_lang) if text else "",
             })
 
+        # -------------------------------------------------------------
+        # 3/3 Zonos Voice Cloning
+        # -------------------------------------------------------------
         print(f"[{job_id}] 3/3 Zonos Voice Cloning ({len(translated_segments)} segments)")
-        source_audio = AudioSegment.from_file(audio_path)
-        job_dir = Path(STORAGE_DIR) / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
+        ref_source_path = vocals_path if separate_stems and os.path.exists(vocals_path) else audio_path
+        source_audio = AudioSegment.from_file(ref_source_path)
 
         for index, segment in enumerate(translated_segments):
             translated_text = segment.get("translated", "").strip()
@@ -233,9 +293,16 @@ def assemble_and_finish_container(
     final_audio_path = os.path.join(job_dir, f"dubbed_timeline.{output_format}")
     final_video_path = os.path.join(job_dir, "final_dubbed.mp4")
 
-    # 1. Timeline Assembly with Safe FFmpeg `atempo` Filter
-    base_audio = AudioSegment.from_file(original_video_path)
+    # 1. Timeline Assembly
+    background_path = os.path.join(job_dir, "background_track.wav")
+    
+    if os.path.exists(background_path):
+        base_audio = AudioSegment.from_file(background_path)
+    else:
+        base_audio = AudioSegment.from_file(original_video_path)
+
     timeline = AudioSegment.silent(duration=len(base_audio))
+    timeline = timeline.overlay(base_audio)
 
     for i, seg in enumerate(translated_segments):
         raw_seg_file = os.path.join(job_dir, f"raw_seg_{i}.wav")
@@ -249,7 +316,6 @@ def assemble_and_finish_container(
         stretched_file = os.path.join(job_dir, f"stretched_seg_{i}.wav")
         if actual_dur_ms > target_dur_ms and target_dur_ms > 100:
             speed_ratio = round(actual_dur_ms / target_dur_ms, 2)
-            # Cap speed ratio at 1.4 for natural listening
             speed_ratio = min(speed_ratio, 1.4)
             
             cmd = [
@@ -266,7 +332,7 @@ def assemble_and_finish_container(
 
     timeline.export(final_audio_path, format=output_format)
 
-    # 2. Merge audio back into original video
+    # 2. Merge audio back into video
     if is_video:
         cmd_merge = [
             "ffmpeg", "-y",
@@ -283,7 +349,7 @@ def assemble_and_finish_container(
         if result.returncode != 0:
             raise RuntimeError(f"FFmpeg merge failed: {result.stderr}")
 
-    # 3. Upload artifacts to Supabase Storage
+    # 3. Upload artifacts
     try:
         audio_url = upload_public_file(Path(final_audio_path), job_id, "audio")
         video_url = upload_public_file(Path(final_video_path), job_id, "video") if is_video else None
@@ -292,7 +358,7 @@ def assemble_and_finish_container(
 
     public_url = video_url or audio_url
 
-    # 4. Optional Webhook Trigger
+    # 4. Optional Webhook
     if webhook_url:
         try:
             requests.post(
@@ -352,6 +418,7 @@ def run_modal_job(
             job_id,
             source_language,
             target_language,
+            separate_stems=enhance_audio,
         )
 
         transcript_path = job_dir / f"{job_id}_transcript.txt"
@@ -389,9 +456,6 @@ def run_modal_job(
         db.close()
 
 
-# -------------------------------------------------------------
-# MODAL ASGI Web App Entrypoint
-# -------------------------------------------------------------
 @app.function(
     image=cpu_image,
     volumes={STORAGE_DIR: SHARED_VOLUME},
