@@ -14,7 +14,7 @@ MODEL_CACHE_DIR = "/root/model_cache"
 STORAGE_DIR = "/root/shared_storage"
 
 # ==========================================
-# 1. CPU IMAGE (Container 1: Orchestration, FFmpeg, Supabase Storage)
+# 1. CPU IMAGE (Container 1: Orchestration, FFmpeg, Supabase)
 # ==========================================
 cpu_image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -34,17 +34,15 @@ cpu_image = (
         "deep-translator",
     )
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
-    # REMOVED: .add_local_file(...) self-reference
 )
 
 # ==========================================
-# 2. L4 IMAGE (WhisperX + Zonos2 in one GPU container)
+# 2. L4 GPU IMAGE (WhisperX + Zonos2 Container)
 # ==========================================
 l4_image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11"
     )
-    # 1. System dependencies for Audio, Alignment, and Zonos Phonemizer
     .apt_install(
         "ffmpeg",
         "git",
@@ -52,7 +50,6 @@ l4_image = (
         "libfst-dev",
         "build-essential"
     )
-    # 2. Pin stable, fully compatible PyTorch and CTranslate2 versions
     .pip_install(
         "torch==2.4.0",
         "torchaudio==2.4.0",
@@ -74,14 +71,12 @@ l4_image = (
         "ninja>=1.11.0",
         "sacremoses>=0.1.1"
     )
-    # 3. Custom repository builds
     .run_commands(
         "pip install --no-deps git+https://github.com/m-bain/whisperX.git",
         "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2",
         "pip install --no-deps descript-audio-codec==1.0.0",
         "pip install /root/Zonos2 --no-deps"
     )
-    # 4. Clean cache paths & HuggingFace fast transfer
     .env(
         {
             "HF_HOME": f"{MODEL_CACHE_DIR}/huggingface",
@@ -94,15 +89,17 @@ l4_image = (
     )
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
 )
+
 app = modal.App("ai-dubbing-full-pipeline")
 
 
 # -------------------------------------------------------------
-# STEP 1: Container 1 [CPU] - Extract Audio via FFmpeg
+# STEP 1: CPU Worker - Audio Extraction
 # -------------------------------------------------------------
 @app.function(image=cpu_image, volumes={STORAGE_DIR: SHARED_VOLUME}, timeout=300)
 def extract_audio_container(job_id: str, video_path: str) -> str:
     try:
+        SHARED_VOLUME.reload()
         job_dir = os.path.join(STORAGE_DIR, job_id)
         os.makedirs(job_dir, exist_ok=True)
         extracted_wav = os.path.join(job_dir, "extracted.wav")
@@ -115,6 +112,8 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
         result = subprocess.run(cmd, capture_output=True, check=False, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"FFmpeg audio extraction failed: {result.stderr}")
+        
+        # Explicit Commit to ensure L4 GPU container can read extracted.wav
         SHARED_VOLUME.commit()
         return extracted_wav
     except Exception as e:
@@ -123,7 +122,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
 
 
 # -------------------------------------------------------------
-# STEP 2: Single L4 GPU - WhisperX -> Groq -> Zonos, sequentially
+# STEP 2: L4 GPU Worker - Transcription, Translation, TTS
 # -------------------------------------------------------------
 @app.function(
     image=l4_image,
@@ -139,21 +138,21 @@ def process_gpu_pipeline(
     src_lang: str,
     tgt_lang: str,
 ) -> list[dict]:
-    """Run transcription, translation, and voice cloning in one L4 worker."""
     try:
         from pydub import AudioSegment
 
-        # FIX 1: Explicitly sync the shared volume to ensure extracted.wav exists locally
+        # Sync Shared Storage to access extracted.wav from Container 1
         SHARED_VOLUME.reload()
 
-        sys.path.insert(0, "/root")
+        if "/root" not in sys.path:
+            sys.path.insert(0, "/root")
+
         from backend.module.transcribe import transcribe_audio_whisperx_full
         from backend.module.translate import translate_text
         from backend.module.tts import generate_speech
 
-        print(f"[{job_id}] 1/3 WhisperX transcription and alignment (large-v3)")
+        print(f"[{job_id}] 1/3 WhisperX transcription & alignment (large-v3)")
         
-        # FIX 2 & 3: Lower batch size to 4 and pass large-v3 target model
         segments = transcribe_audio_whisperx_full(
             audio_path,
             src_lang,
@@ -165,19 +164,22 @@ def process_gpu_pipeline(
         if not segments:
             raise RuntimeError("WhisperX returned no speech segments")
 
-        print(f"[{job_id}] 2/3 Groq translation ({len(segments)} segments)")
+        # Save downloaded models to volume cache
+        MODEL_VOLUME.commit()
+
+        print(f"[{job_id}] 2/3 Translation ({len(segments)} segments)")
         translated_segments = []
         for segment in segments:
             text = segment.get("text", "").strip()
             translated_segments.append({
                 **segment,
-                "translated": translate_text(text, src_lang, tgt_lang),
+                "translated": translate_text(text, src_lang, tgt_lang) if text else "",
             })
 
-        print(f"[{job_id}] 3/3 Zonos voice cloning ({len(translated_segments)} segments)")
+        print(f"[{job_id}] 3/3 Zonos Voice Cloning ({len(translated_segments)} segments)")
         source_audio = AudioSegment.from_file(audio_path)
         job_dir = Path(STORAGE_DIR) / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)  # Ensure output directory exists
+        job_dir.mkdir(parents=True, exist_ok=True)
 
         for index, segment in enumerate(translated_segments):
             translated_text = segment.get("translated", "").strip()
@@ -197,15 +199,15 @@ def process_gpu_pipeline(
                 language=tgt_lang,
             )
 
-        MODEL_VOLUME.commit()
         SHARED_VOLUME.commit()
         return translated_segments
     except Exception as e:
         print(f"ERROR [process_gpu_pipeline]: {str(e)}")
         raise
 
+
 # -------------------------------------------------------------
-# STEP 3: Container 1 [CPU] - Time-Stretch, Merge, Supabase Storage & Ping
+# STEP 3: CPU Worker - Time-Stretch, Merge & Storage Upload
 # -------------------------------------------------------------
 @app.function(
     image=cpu_image,
@@ -220,9 +222,10 @@ def assemble_and_finish_container(
     webhook_url: str = "",
     is_video: bool = True,
     output_format: str = "wav",
-):
+) -> dict:
     from pydub import AudioSegment
-    sys.path.insert(0, "/root")
+    if "/root" not in sys.path:
+        sys.path.insert(0, "/root")
     from backend.storage import upload_public_file
 
     SHARED_VOLUME.reload()
@@ -230,7 +233,7 @@ def assemble_and_finish_container(
     final_audio_path = os.path.join(job_dir, f"dubbed_timeline.{output_format}")
     final_video_path = os.path.join(job_dir, "final_dubbed.mp4")
 
-    # 1. Timeline Assembly with FFmpeg `atempo` Time-Stretching
+    # 1. Timeline Assembly with Safe FFmpeg `atempo` Filter
     base_audio = AudioSegment.from_file(original_video_path)
     timeline = AudioSegment.silent(duration=len(base_audio))
 
@@ -243,11 +246,11 @@ def assemble_and_finish_container(
         seg_audio = AudioSegment.from_file(raw_seg_file)
         actual_dur_ms = len(seg_audio)
 
-        # Apply FFmpeg atempo filter if segment exceeds window length
         stretched_file = os.path.join(job_dir, f"stretched_seg_{i}.wav")
         if actual_dur_ms > target_dur_ms and target_dur_ms > 100:
             speed_ratio = round(actual_dur_ms / target_dur_ms, 2)
-            speed_ratio = min(speed_ratio, 1.35)  # Cap speed factor for natural voice
+            # Cap speed ratio at 1.4 for natural listening
+            speed_ratio = min(speed_ratio, 1.4)
             
             cmd = [
                 "ffmpeg", "-y", "-i", raw_seg_file,
@@ -255,9 +258,7 @@ def assemble_and_finish_container(
                 stretched_file
             ]
             result = subprocess.run(cmd, capture_output=True, check=False, text=True)
-            if result.returncode != 0:
-                raise RuntimeError(f"FFmpeg atempo failed: {result.stderr}")
-            processed_clip = AudioSegment.from_file(stretched_file)
+            processed_clip = AudioSegment.from_file(stretched_file) if result.returncode == 0 else seg_audio
         else:
             processed_clip = seg_audio
 
@@ -265,7 +266,7 @@ def assemble_and_finish_container(
 
     timeline.export(final_audio_path, format=output_format)
 
-    # 2. Merge the dubbed audio back into the source video when applicable.
+    # 2. Merge audio back into original video
     if is_video:
         cmd_merge = [
             "ffmpeg", "-y",
@@ -282,7 +283,7 @@ def assemble_and_finish_container(
         if result.returncode != 0:
             raise RuntimeError(f"FFmpeg merge failed: {result.stderr}")
 
-    # 3. Upload final artifacts to public Supabase Storage.
+    # 3. Upload artifacts to Supabase Storage
     try:
         audio_url = upload_public_file(Path(final_audio_path), job_id, "audio")
         video_url = upload_public_file(Path(final_video_path), job_id, "video") if is_video else None
@@ -291,7 +292,7 @@ def assemble_and_finish_container(
 
     public_url = video_url or audio_url
 
-    # 4. Webhook Ping Back to Vercel
+    # 4. Optional Webhook Trigger
     if webhook_url:
         try:
             requests.post(
@@ -306,30 +307,10 @@ def assemble_and_finish_container(
                 timeout=10
             )
         except Exception as e:
-            # Log webhook error but don't fail the job
             print(f"Warning: Webhook notification failed: {str(e)}")
 
+    SHARED_VOLUME.commit()
     return {"audio_url": audio_url, "video_url": video_url, "download_url": public_url}
-
-
-def call_assemble_and_finish(
-    job_id: str,
-    original_video_path: str,
-    translated_segments: list[dict],
-    webhook_url: str = "",
-) -> str:
-    """Call the Modal assembler for files stored on the shared Modal volume."""
-    if not Path(original_video_path).is_file():
-        raise FileNotFoundError(f"Original video not found: {original_video_path}")
-    if not translated_segments:
-        raise ValueError("At least one translated segment is required.")
-
-    return assemble_and_finish_container.remote(
-        job_id,
-        original_video_path,
-        translated_segments,
-        webhook_url,
-    )
 
 
 @app.function(
@@ -347,7 +328,8 @@ def run_modal_job(
     output_format: str,
     enhance_audio: bool,
 ) -> dict:
-    """Run CPU file handling around one sequential L4 model worker."""
+    if "/root" not in sys.path:
+        sys.path.insert(0, "/root")
     from backend.db import Job, SessionLocal
     from backend.storage import upload_public_file
 
@@ -362,8 +344,9 @@ def run_modal_job(
     try:
         job.status = "processing"
         db.commit()
+
         working_audio_path = extract_audio_container.remote(job_id, source_path)
-        SHARED_VOLUME.reload()
+        
         translated_segments = process_gpu_pipeline.remote(
             working_audio_path,
             job_id,
@@ -380,7 +363,7 @@ def run_modal_job(
             ),
             encoding="utf-8",
         )
-        SHARED_VOLUME.reload()
+        SHARED_VOLUME.commit()
 
         result = assemble_and_finish_container.remote(
             job_id, source_path, translated_segments, "", is_video, output_format
@@ -407,7 +390,7 @@ def run_modal_job(
 
 
 # -------------------------------------------------------------
-# MODAL ORCHESTRATOR: Async Pipeline Trigger
+# MODAL ASGI Web App Entrypoint
 # -------------------------------------------------------------
 @app.function(
     image=cpu_image,
@@ -417,8 +400,8 @@ def run_modal_job(
 )
 @modal.asgi_app()
 def fastapi_app():
-    sys.path.insert(0, "/root")
-    sys.path.insert(0, "/root/backend")
+    if "/root" not in sys.path:
+        sys.path.insert(0, "/root")
     os.environ.setdefault("DUBBING_USE_MODAL_WORKERS", "1")
     os.environ.setdefault("MODAL_PIPELINE", "1")
 
