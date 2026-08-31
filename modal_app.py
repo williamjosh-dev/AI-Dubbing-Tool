@@ -44,48 +44,52 @@ l4_image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11"
     )
-    .apt_install("ffmpeg", "git")
+    # 1. System dependencies for Audio, Alignment, and Zonos Phonemizer
+    .apt_install(
+        "ffmpeg",
+        "git",
+        "espeak-ng",
+        "libfst-dev",
+        "build-essential"
+    )
+    # 2. Pin stable, fully compatible PyTorch and CTranslate2 versions
     .pip_install(
-        "torch==2.9.1",
-        "torchaudio==2.9.1",
-        "torchvision==0.24.1",
-        "ctranslate2>=4.5.0",
-        "nltk>=3.9.1",
+        "torch==2.4.0",
+        "torchaudio==2.4.0",
+        "ctranslate2>=4.4.0",
+        "faster-whisper>=1.0.3",
+        "transformers>=4.40.0,<4.48.0",
+        "huggingface_hub",
+        "soundfile",
+        "pydub",
+        "numpy<2.0.0",
+        "pyannote.audio>=3.1.1",
         "omegaconf>=2.3.0",
-        "pandas>=2.2.3",
-        "pyannote-audio>=4.0.0",
-        "torchcodec>=0.6.0,<0.8.0",
-        "triton>=3.3.0",
+        "pandas>=2.2.0",
+        "nltk>=3.9.1",
         "groq",
-        "numpy",
         "protobuf>=5.0.0",
         "python-dotenv>=1.0",
-        "huggingface_hub",
-        "pydub",
-        "soundfile",
         "msgpack",
-        "transformers>=4.56.0,<=4.57.3",
         "ninja>=1.11.0",
-        "sacremoses>=0.1.1",
+        "sacremoses>=0.1.1"
     )
+    # 3. Custom repository builds
+    .run_commands(
+        "pip install --no-deps git+https://github.com/m-bain/whisperX.git",
+        "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2",
+        "pip install --no-deps descript-audio-codec==1.0.0",
+        "pip install /root/Zonos2 --no-deps"
+    )
+    # 4. Clean cache paths & HuggingFace fast transfer
     .env(
         {
             "HF_HOME": f"{MODEL_CACHE_DIR}/huggingface",
             "XDG_CACHE_HOME": f"{MODEL_CACHE_DIR}/cache",
-        }
-    )
-    .apt_install("espeak-ng", "libfst-dev")
-    .run_commands(
-        "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2",
-        "pip install --no-deps descript-audio-codec==1.0.0",
-        "pip install /root/Zonos2 --no-deps",
-        "pip install faster-whisper==1.2.0",
-        "pip install --no-deps git+https://github.com/m-bain/whisperX.git",
-    )
-    .env(
-        {
             "HF_HUB_ENABLE_HF_TRANSFER": "1",
-            "HF_HOME": f"{MODEL_CACHE_DIR}/huggingface",
+            "WHISPER_MODEL": "large-v3",
+            "WHISPER_BATCH_SIZE": "4",
+            "WHISPER_COMPUTE_TYPE": "float16",
         }
     )
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
@@ -139,18 +143,24 @@ def process_gpu_pipeline(
     try:
         from pydub import AudioSegment
 
+        # FIX 1: Explicitly sync the shared volume to ensure extracted.wav exists locally
+        SHARED_VOLUME.reload()
+
         sys.path.insert(0, "/root")
         from backend.module.transcribe import transcribe_audio_whisperx_full
         from backend.module.translate import translate_text
         from backend.module.tts import generate_speech
 
-        print(f"[{job_id}] 1/3 WhisperX transcription and alignment")
+        print(f"[{job_id}] 1/3 WhisperX transcription and alignment (large-v3)")
+        
+        # FIX 2 & 3: Lower batch size to 4 and pass large-v3 target model
         segments = transcribe_audio_whisperx_full(
             audio_path,
             src_lang,
             device="cuda",
+            model_name="large-v3",
             compute_type=os.getenv("WHISPER_COMPUTE_TYPE", "float16"),
-            batch_size=int(os.getenv("WHISPER_BATCH_SIZE", "16")),
+            batch_size=int(os.getenv("WHISPER_BATCH_SIZE", "4")),
         )
         if not segments:
             raise RuntimeError("WhisperX returned no speech segments")
@@ -167,6 +177,8 @@ def process_gpu_pipeline(
         print(f"[{job_id}] 3/3 Zonos voice cloning ({len(translated_segments)} segments)")
         source_audio = AudioSegment.from_file(audio_path)
         job_dir = Path(STORAGE_DIR) / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)  # Ensure output directory exists
+
         for index, segment in enumerate(translated_segments):
             translated_text = segment.get("translated", "").strip()
             if not translated_text:
@@ -176,6 +188,7 @@ def process_gpu_pipeline(
             end_ms = max(start_ms + 100, int(segment.get("end", 0) * 1000))
             reference_path = job_dir / f"ref_{index}.wav"
             output_path = job_dir / f"raw_seg_{index}.wav"
+            
             source_audio[start_ms:end_ms].export(reference_path, format="wav")
             generate_speech(
                 text=translated_text,
@@ -190,7 +203,6 @@ def process_gpu_pipeline(
     except Exception as e:
         print(f"ERROR [process_gpu_pipeline]: {str(e)}")
         raise
-
 
 # -------------------------------------------------------------
 # STEP 3: Container 1 [CPU] - Time-Stretch, Merge, Supabase Storage & Ping

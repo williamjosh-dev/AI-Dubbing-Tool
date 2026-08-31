@@ -11,7 +11,7 @@ groq_api_key = os.getenv("GROQ_API_KEY")
 groq_client = Groq(api_key=groq_api_key) if groq_api_key else None
 
 
-def align_with_whisperx(audio_file_path, segments, language, device):
+def align_with_whisperx(audio_file_path: str, segments: list, language: str, device: str = "cuda"):
     """
     Applies Wav2Vec2 forced alignment to pre-transcribed text segments.
     Skips Whisper transcription entirely.
@@ -19,7 +19,7 @@ def align_with_whisperx(audio_file_path, segments, language, device):
     if not segments:
         return segments
 
-    print(f"⏱️ Aligning Groq transcript with WhisperX wav2vec2 model ({language})...")
+    print(f"⏱️ Aligning transcript with WhisperX wav2vec2 model ({language}) on {device}...")
     audio = whisperx.load_audio(audio_file_path)
     
     align_model, metadata = whisperx.load_align_model(
@@ -45,43 +45,56 @@ def align_with_whisperx(audio_file_path, segments, language, device):
     return aligned_result.get("segments", segments)
 
 
-def transcribe_audio_whisperx_full(audio_path, language, device, compute_type, batch_size):
-    """Fallback handler: Full WhisperX pipeline (Transcription + Alignment)."""
+def transcribe_audio_whisperx_full(
+    audio_path: str,
+    language: str = "en",
+    device: str = "cuda",
+    model_name: str = "large-v3",
+    compute_type: str = "float16",
+    batch_size: int = 4,
+):
+    """Full local WhisperX pipeline (Transcription + Forced Alignment)."""
+    if not os.path.exists(audio_path):
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
     audio = whisperx.load_audio(audio_path)
-    print(f"🎙️ [Fallback] Running full WhisperX local pipeline on {device}...")
+    target_model = model_name or os.getenv("WHISPER_MODEL", "large-v3")
+    print(f"🎙️ Running WhisperX local transcription [{target_model}] on {device}...")
     
     model = whisperx.load_model(
-        os.getenv("WHISPER_MODEL", "small"),
+        target_model,
         device=device,
         compute_type=compute_type,
         language=language
     )
     result = model.transcribe(audio, batch_size=batch_size)
 
+    # Free local model from VRAM before loading alignment model
     del model
     gc.collect()
     if device == "cuda":
         torch.cuda.empty_cache()
 
-    segments = result.get("segments", [])
-    return align_with_whisperx(audio_path, segments, language, device)
+    raw_segments = result.get("segments", [])
+    return align_with_whisperx(audio_path, raw_segments, language, device)
 
 
-def transcribe_audio(audio_path, language="es", enable_alignment=True):
+def transcribe_audio(audio_path: str, language: str = "es", enable_alignment: bool = True):
+    """
+    Hybrid Transcriber: Attempts Groq API first; falls back to local WhisperX.
+    """
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
     language = (language or "es").strip() or "es"
-    device = os.getenv("WHISPER_DEVICE", "cpu")
-    compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
-    batch_size = int(os.getenv("WHISPER_BATCH_SIZE", "16"))
+    device = os.getenv("WHISPER_DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
+    compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "float16" if device == "cuda" else "int8")
+    batch_size = int(os.getenv("WHISPER_BATCH_SIZE", "4"))
 
     segments = []
     used_groq = False
 
-    # -------------------------------------------------------------
     # 1. Primary Route: Groq API for Fast Text & Basic Segments
-    # -------------------------------------------------------------
     if groq_client:
         try:
             print("🚀 Fetching text from Groq API (whisper-large-v3)...")
@@ -94,7 +107,6 @@ def transcribe_audio(audio_path, language="es", enable_alignment=True):
                     timestamp_granularities=["segment"]
                 )
 
-            # Standardize Groq segment structure into WhisperX format
             raw_segments = getattr(response, "segments", [])
             for seg in raw_segments:
                 seg_dict = seg if isinstance(seg, dict) else seg.__dict__
@@ -107,30 +119,29 @@ def transcribe_audio(audio_path, language="es", enable_alignment=True):
             used_groq = True
 
         except Exception as groq_err:
-            print(f"⚠️ Groq API failed ({groq_err}). Switching to full WhisperX local pipeline...")
+            print(f"⚠️ Groq API failed ({groq_err}). Switching to local WhisperX...")
 
-    # -------------------------------------------------------------
     # 2. Alignment Phase / Full Fallback Execution
-    # -------------------------------------------------------------
     if used_groq and segments and enable_alignment:
         try:
-            # HYBRID MODE: Take Groq segments and run WhisperX forced alignment on them
             segments = align_with_whisperx(audio_path, segments, language, device)
         except Exception as align_err:
-            print(f"⚠️ Hybrid alignment failed ({align_err}). Keeping native Groq segment timestamps.")
+            print(f"⚠️ Hybrid alignment failed ({align_err}). Retaining native Groq timestamps.")
 
     elif not segments:
-        # FULL FALLBACK: Run both transcription and alignment locally with WhisperX
         segments = transcribe_audio_whisperx_full(
-            audio_path, language, device, compute_type, batch_size
+            audio_path=audio_path,
+            language=language,
+            device=device,
+            model_name=os.getenv("WHISPER_MODEL", "large-v3"),
+            compute_type=compute_type,
+            batch_size=batch_size,
         )
 
     if not segments:
         raise RuntimeError("No speech recognized in audio")
 
-    # -------------------------------------------------------------
     # 3. Format Output Structure
-    # -------------------------------------------------------------
     formatted_output = []
     for segment in segments:
         text = segment.get("text", "").strip()
