@@ -1,27 +1,31 @@
 # Web Framework & API Server
-fastapi
-uvicorn
-python-multipart
+fastapi>=0.110.0,<1.0
+uvicorn>=0.29.0,<1.0
+python-multipart>=0.0.9
 python-dotenv>=1.0
 
 # Database
-sqlalchemy>=2.0
-psycopg2-binary
-supabase
+sqlalchemy>=2.0.0,<3.0
+psycopg2-binary>=2.9.0,<3.0
+supabase>=2.4.0,<3.0
 
 # Speech Recognition & Translation
-faster-whisper
-deep-translator
+faster-whisper>=1.0.3,<2.0.0
+deep-translator>=1.11.0,<2.0
+pyannote.audio>=3.1.1,<4.0
 
 # Text-to-Speech (TTS) Engines
-coqui-tts
-google-cloud-texttospeech
-gtts
-elevenlabs
+coqui-tts>=0.11.0
+google-cloud-texttospeech>=2.16.0
+gtts>=2.5.0
+elevenlabs>=0.27.0
 
 # Audio Processing & Utilities
-pydub
+pydub>=0.25.1
+numpy<2.0.0
+protobuf>=4.25.0,<6.0.0
 
 # Hugging Face Compatibility Fixes
 transformers==4.38.2
-huggingface-hub<=0.23.0
+huggingface-hub==0.23.0
+tokenizers==0.18.3
