@@ -2,16 +2,17 @@ import os
 import shutil
 import subprocess
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile , BackgroundTasks, Depends
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
+from db import Job, SessionLocal, get_db, init_db
 from pipeline import AudioTranslationPipeline
-from db import init_db, get_db, Job, SessionLocal
 from storage import upload_public_file
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -41,12 +42,22 @@ LANGUAGE_ALIASES = {
     "pt": "pt",
     "japanese": "ja",
     "ja": "ja",
+    "bengali": "bn",
+    "bn": "bn",
 }
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="AI Dubbing API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize database on application startup."""
+    init_db()
+    yield
+
+
+app = FastAPI(title="AI Dubbing API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,12 +69,6 @@ app.add_middleware(
 )
 
 app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
-
-
-@app.on_event("startup")
-def startup_event():
-    """Initialize database on startup."""
-    init_db()
 
 
 def normalize_language(value: str, default: str) -> str:
@@ -104,12 +109,16 @@ def run_ffmpeg(command: list[str]) -> None:
     try:
         subprocess.run(command, check=True, capture_output=True)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=500, detail="FFmpeg is required but was not found on PATH.") from exc
+        raise HTTPException(
+            status_code=500, detail="FFmpeg is required but was not found on PATH."
+        ) from exc
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr.decode("utf-8", errors="ignore").strip() if exc.stderr else ""
         stdout = exc.stdout.decode("utf-8", errors="ignore").strip() if exc.stdout else ""
         message = stderr or stdout or str(exc)
-        raise HTTPException(status_code=500, detail=f"FFmpeg processing failed: {message}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"FFmpeg processing failed: {message}"
+        ) from exc
 
 
 def extract_audio(source_path: Path, target_path: Path, enhance_audio: bool) -> None:
@@ -208,7 +217,9 @@ def run_dubbing_pipeline(
         if job:
             audio_url = upload_public_file(dubbed_audio_path, job_id, "audio")
             transcript_url = upload_public_file(transcript_path, job_id, "transcript")
-            video_url = upload_public_file(dubbed_video_path, job_id, "video") if is_video else None
+            video_url = (
+                upload_public_file(dubbed_video_path, job_id, "video") if is_video else None
+            )
             job.audio_url = audio_url
             job.video_url = video_url
             job.transcript_url = transcript_url
@@ -225,6 +236,7 @@ def run_dubbing_pipeline(
             db.commit()
     finally:
         db.close()
+
 
 @app.post("/api/dub")
 def dub_audio(
@@ -252,12 +264,9 @@ def dub_audio(
     job_id = uuid.uuid4().hex[:12]
     original_ext = audioFile.filename.rsplit(".", 1)[1].lower()
     safe_stem = Path(audioFile.filename).stem.replace(" ", "_")
-    modal_pipeline = os.getenv("MODAL_PIPELINE") == "1"
-    if modal_pipeline:
-        source_path = Path("/root/shared_storage") / job_id / f"source.{original_ext}"
-        source_path.parent.mkdir(parents=True, exist_ok=True)
-    else:
-        source_path = UPLOAD_DIR / f"{job_id}_{safe_stem}.{original_ext}"
+
+    # Local upload path
+    source_path = UPLOAD_DIR / f"{job_id}_{safe_stem}.{original_ext}"
 
     with source_path.open("wb") as buffer:
         shutil.copyfileobj(audioFile.file, buffer)
@@ -288,13 +297,16 @@ def dub_audio(
     finally:
         db.close()
 
+    modal_pipeline = os.getenv("MODAL_PIPELINE") == "1"
     if modal_pipeline:
-        from modal_app import SHARED_VOLUME, run_modal_job
+        from modal_app import run_modal_job
 
-        SHARED_VOLUME.commit()
+        # Read local file bytes and pass directly into Modal worker
+        file_bytes = source_path.read_bytes()
         run_modal_job.spawn(
             job_id,
-            str(source_path),
+            file_bytes,
+            original_ext,
             is_video,
             source_language,
             target_language,
@@ -323,27 +335,27 @@ def dub_audio(
 
 
 @app.get("/api/status/{job_id}")
-def get_job_status(job_id: str) -> dict:
-    db = SessionLocal()
-    try:
-        job = db.query(Job).filter(Job.job_id == job_id).first()
-        if not job:
-            raise HTTPException(status_code=404, detail="Job not found.")
-        return {
-            "jobId": job.job_id,
-            "status": job.status,
-            "error": job.error,
-            "downloadUrl": job.download_url,
-            "result": {
+def get_job_status(job_id: str, db: Session = Depends(get_db)) -> dict:
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return {
+        "jobId": job.job_id,
+        "status": job.status,
+        "error": job.error,
+        "downloadUrl": job.download_url,
+        "result": (
+            {
                 "audioUrl": job.audio_url,
                 "videoUrl": job.video_url,
                 "transcriptUrl": job.transcript_url,
-            } if job.status == "completed" else None,
-            "createdAt": job.created_at.isoformat(),
-            "updatedAt": job.updated_at.isoformat(),
-        }
-    finally:
-        db.close()
+            }
+            if job.status == "completed"
+            else None
+        ),
+        "createdAt": job.created_at.isoformat(),
+        "updatedAt": job.updated_at.isoformat(),
+    }
 
 
 if __name__ == "__main__":
