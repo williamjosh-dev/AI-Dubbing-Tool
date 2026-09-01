@@ -301,17 +301,28 @@ def dub_audio(
     if modal_pipeline:
         from modal_app import run_modal_job
 
-        # Read local file bytes and pass directly into Modal worker
-        file_bytes = source_path.read_bytes()
+        # 1. Define shared storage path where Modal workers can access it
+        SHARED_STORAGE_DIR = "/root/shared_storage"
+        job_shared_dir = os.path.join(SHARED_STORAGE_DIR, job_id)
+        os.makedirs(job_shared_dir, exist_ok=True)
+        
+        # 2. Save file to the shared storage path
+        shared_source_path = os.path.join(job_shared_dir, f"input.{original_ext}")
+        shutil.copyfile(source_path, shared_source_path)
+
+        # 3. Sanitize strings to avoid null bytes
+        clean_job_id = str(job_id).replace("\x00", "").strip()
+        clean_source_path = str(shared_source_path).replace("\x00", "").strip()
+
+        # 4. Pass the string file path (NOT file_bytes) to Modal
         run_modal_job.spawn(
-            job_id,
-            file_bytes,
-            original_ext,
-            is_video,
-            source_language,
-            target_language,
-            output_format,
-            enhance_flag,
+            job_id=clean_job_id,
+            source_path=clean_source_path,
+            is_video=is_video,
+            source_language=source_language,
+            target_language=target_language,
+            output_format=output_format,
+            enhance_audio=enhance_flag,
         )
     else:
         background_tasks.add_task(
@@ -332,7 +343,6 @@ def dub_audio(
         )
 
     return {"jobId": job_id, "status": "queued"}
-
 
 @app.get("/api/status/{job_id}")
 def get_job_status(job_id: str, db: Session = Depends(get_db)) -> dict:

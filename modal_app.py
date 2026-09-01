@@ -107,10 +107,17 @@ app = modal.App("ai-dubbing-full-pipeline")
 def extract_audio_container(job_id: str, video_path: str) -> str:
     if "/root" not in sys.path:
         sys.path.insert(0, "/root")
-    
-    # Clean inputs to remove any trailing/embedded null bytes
+
+    # Clean inputs and strip null bytes
     job_id = str(job_id).replace("\x00", "").strip()
     video_path = str(video_path).replace("\x00", "").strip()
+
+    # Safety check against passing file contents instead of file paths
+    if len(video_path) > 1024:
+        raise ValueError(
+            f"video_path is unusually long ({len(video_path)} chars). "
+            "Ensure you are passing a file path, not raw binary/base64 data."
+        )
 
     SHARED_VOLUME.reload()
     job_dir = os.path.join(STORAGE_DIR, job_id)
@@ -122,6 +129,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
         "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
         extracted_wav
     ]
+    
     result = subprocess.run(cmd, capture_output=True, check=False, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg audio extraction failed: {result.stderr}")
