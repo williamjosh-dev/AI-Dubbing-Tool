@@ -164,7 +164,7 @@ def process_gpu_pipeline(
     SHARED_VOLUME.reload()
     import torch
     from pydub import AudioSegment
-    from backend.demucs_service import DemucsBackend
+    from backend.demcus_service import DemucsBackend
     from backend.module.transcribe import transcribe_audio_whisperx_full
     from backend.module.translate import translate_text
     from backend.module.tts import generate_speech
