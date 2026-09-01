@@ -11,9 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
-from db import Job, SessionLocal, get_db, init_db
-from pipeline import AudioTranslationPipeline
-from storage import upload_public_file
+from backend.db import Job, SessionLocal, get_db, init_db
+from backend.pipeline import AudioTranslationPipeline
+from backend.storage import upload_public_file
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent

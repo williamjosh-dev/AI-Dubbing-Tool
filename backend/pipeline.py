@@ -13,7 +13,7 @@ from typing import List
 from pydub import AudioSegment
 from pydub.effects import speedup
 
-from module.translate import translate_text
+from backend.module.translate import translate_text
 
 
 class AudioTranslationPipeline:
@@ -27,7 +27,7 @@ class AudioTranslationPipeline:
     def transcribe(self, audio_path: str) -> List[dict]:
         """Transcribe audio into timestamped text segments using hybrid/Groq logic."""
         # ROUTE THROUGH TRANSCRIBE MODULE (Which handles Groq/WhisperX Hybrid + Modal)
-        from module.transcribe import transcribe_audio
+        from backend.module.transcribe import transcribe_audio
 
         return transcribe_audio(audio_path, language=self.src_lang)
 
@@ -37,7 +37,7 @@ class AudioTranslationPipeline:
 
     def synthesize(self, text: str, output_path: str, reference_audio: str | None = None) -> str:
         """Synthesize translated text into an audio file."""
-        from module.tts import generate_speech
+        from backend.module.tts import generate_speech
 
         return generate_speech(
             text,
