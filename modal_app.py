@@ -105,6 +105,9 @@ app = modal.App("ai-dubbing-full-pipeline")
 # -------------------------------------------------------------
 @app.function(image=cpu_image, volumes={STORAGE_DIR: SHARED_VOLUME}, timeout=300)
 def extract_audio_container(job_id: str, video_path: str) -> str:
+    if "/root" not in sys.path:
+        sys.path.insert(0, "/root")
+    
     SHARED_VOLUME.reload()
     job_dir = os.path.join(STORAGE_DIR, job_id)
     os.makedirs(job_dir, exist_ok=True)
@@ -259,6 +262,8 @@ def assemble_and_finish_container(
 
     SHARED_VOLUME.reload()
     job_dir = os.path.join(STORAGE_DIR, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    
     final_audio_path = os.path.join(job_dir, f"dubbed_timeline.{output_format}")
     final_video_path = os.path.join(job_dir, "final_dubbed.mp4")
 
@@ -346,6 +351,8 @@ def run_modal_job(
     target_language: str,
     output_format: str,
     enhance_audio: bool,
+    *args,  # Catch-all for extra positional arguments to prevent TypeError
+    **kwargs,
 ) -> dict:
     if "/root" not in sys.path:
         sys.path.insert(0, "/root")
