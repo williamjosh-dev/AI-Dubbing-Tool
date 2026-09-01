@@ -160,6 +160,7 @@ def process_gpu_pipeline(
     from pydub import AudioSegment
 
     SHARED_VOLUME.reload()
+    import sys
     if "/root" not in sys.path:
         sys.path.insert(0, "/root")
 
