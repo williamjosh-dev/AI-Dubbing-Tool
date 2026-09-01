@@ -156,14 +156,14 @@ def process_gpu_pipeline(
     tgt_lang: str,
     separate_stems: bool = True,
 ) -> list[dict]:
-    import torch
-    from pydub import AudioSegment
-
-    SHARED_VOLUME.reload()
+    
     import sys
     if "/root" not in sys.path:
         sys.path.insert(0, "/root")
 
+    SHARED_VOLUME.reload()
+    import torch
+    from pydub import AudioSegment
     from backend.demucs_service import DemucsBackend
     from backend.module.transcribe import transcribe_audio_whisperx_full
     from backend.module.translate import translate_text
