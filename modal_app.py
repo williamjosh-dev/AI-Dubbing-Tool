@@ -63,6 +63,7 @@ l4_image = (
         "faster-whisper>=1.0.3",
         "transformers>=4.40.0,<4.48.0",
         "huggingface_hub",
+        "hf_transfer",
         "soundfile",
         "pydub",
         "pyannote.audio>=3.1.1",
