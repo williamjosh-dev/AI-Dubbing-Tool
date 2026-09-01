@@ -108,6 +108,10 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     if "/root" not in sys.path:
         sys.path.insert(0, "/root")
     
+    # Clean inputs to remove any trailing/embedded null bytes
+    job_id = str(job_id).replace("\x00", "").strip()
+    video_path = str(video_path).replace("\x00", "").strip()
+
     SHARED_VOLUME.reload()
     job_dir = os.path.join(STORAGE_DIR, job_id)
     os.makedirs(job_dir, exist_ok=True)
@@ -124,6 +128,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     
     SHARED_VOLUME.commit()
     return extracted_wav
+
 
 # -------------------------------------------------------------
 # STEP 2: L4 GPU Worker Pipeline
