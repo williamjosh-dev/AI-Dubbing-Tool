@@ -66,7 +66,7 @@ l4_image = (
         "hf_transfer",
         "soundfile",
         "pydub",
-        "pyannote.audio>=3.1.1",
+        "pyannote.audio==3.1.1",
         "omegaconf>=2.3.0",
         "pandas>=2.2.0",
         "nltk>=3.9.1",
