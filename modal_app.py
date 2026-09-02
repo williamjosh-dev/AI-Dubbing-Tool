@@ -67,7 +67,6 @@ l4_image = (
         "soundfile",
         "pydub",
         "speechbrain==0.5.16",
-        "pyannote.audio==3.3.1",
         "omegaconf>=2.3.0",
         "pandas>=2.2.0",
         "nltk>=3.9.1",
@@ -81,7 +80,7 @@ l4_image = (
     )
     .run_commands(
         "pip install --no-deps git+https://github.com/m-bain/whisperX.git",
-        "pip install pyannote.audio==3.3.1 --force-reinstall",
+        "pip install --no-deps pyannote.audio==3.3.1 --force-reinstall",
         "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2",
         "pip install --no-deps descript-audio-codec==1.0.0",
         "pip install /root/Zonos2 --no-deps"
