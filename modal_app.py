@@ -40,33 +40,33 @@ cpu_image = (
 # ==========================================
 # 2. L4 GPU IMAGE
 # ==========================================
-def download_demucs_weights():
-    from demucs.pretrained import get_model
-    get_model("htdemucs")
-
 l4_image = (
-    modal.Image.from_registry(
-        "nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11"
-    )
+    modal.Image.from_registry("nvidia/cuda:12.1.1-devel-ubuntu22.04", add_python="3.11")
     .apt_install(
         "ffmpeg",
         "git",
         "espeak-ng",
         "libfst-dev",
         "libsndfile1",
-        "build-essential"
+        "build-essential",
+        "g++",
     )
+    .pip_install("wheel", "setuptools", "packaging", "ninja")
     .pip_install(
-        "numpy<2.0.0",
         "torch==2.4.0",
         "torchaudio==2.4.0",
         "torchvision==0.19.0",
+        index_url="https://download.pytorch.org/whl/cu121",
+    )
+    # Target flash-attn precompiled wheel for Torch 2.4 / CUDA 12.1 if needed
+    .pip_install("flash-attn", extra_options="--no-build-isolation")
+    .pip_install(
+        "numpy<2.0.0",
         "ctranslate2>=4.4.0",
         "faster-whisper>=1.0.3",
         "transformers>=4.40.0,<4.48.0",
         "huggingface_hub",
         "hf_transfer",
-        # Core runtime dependencies
         "pyannote.core",
         "pyannote.database",
         "pyannote.metrics",
@@ -78,8 +78,6 @@ l4_image = (
         "av",
         "evaluate",
         "jiwer",
-        "setuptools",
-        # Zonos2 dependencies
         "phonemizer",
         "kanjize",
         "einops",
@@ -101,27 +99,18 @@ l4_image = (
         "protobuf>=5.0.0",
         "python-dotenv>=1.0",
         "msgpack",
-        "ninja>=1.11.0",
         "sacremoses>=0.1.1",
         "demucs",
     )
-    # Bypass pyannote version conflict with speechbrain via --no-deps
     .run_commands(
         "pip install pyannote.audio==3.3.1 --no-deps",
-        "pip install whisperx @ git+https://github.com/m-bain/whisperX.git --no-deps"
-    )
-    .pip_install(
-        "causal-conv1d",
-        "mamba-ssm",
-        "flash-attn",
-        extra_options="--no-build-isolation"
+        "pip install git+https://github.com/m-bain/whisperX.git --no-deps",
     )
     .run_commands(
         "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2",
         "pip install --no-deps descript-audio-codec==1.0.0",
-        "pip install /root/Zonos2 --no-deps"
+        "pip install /root/Zonos2 --no-deps",
     )
-    .run_function(download_demucs_weights)
     .env(
         {
             "HF_HOME": f"{MODEL_CACHE_DIR}/huggingface",
@@ -146,11 +135,9 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     if "/root" not in sys.path:
         sys.path.insert(0, "/root")
 
-    # Clean inputs and strip null bytes
     job_id = str(job_id).replace("\x00", "").strip()
     video_path = str(video_path).replace("\x00", "").strip()
 
-    # Safety check against passing file contents instead of file paths
     if len(video_path) > 1024:
         raise ValueError(
             f"video_path is unusually long ({len(video_path)} chars). "
@@ -175,7 +162,6 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     SHARED_VOLUME.commit()
     return extracted_wav
 
-
 # -------------------------------------------------------------
 # STEP 2: L4 GPU Worker Pipeline
 # -------------------------------------------------------------
@@ -194,14 +180,13 @@ def process_gpu_pipeline(
     tgt_lang: str,
     separate_stems: bool = True,
 ) -> list[dict]:
-    
     if "/root" not in sys.path:
         sys.path.insert(0, "/root")
 
     SHARED_VOLUME.reload()
     import torch
     from pydub import AudioSegment
-    from backend.demcus_service import DemucsBackend
+    from backend.demucs_service import DemucsBackend
     from backend.module.transcribe import transcribe_audio_whisperx_full
     from backend.module.translate import translate_text
     from backend.module.tts import generate_speech
@@ -213,7 +198,6 @@ def process_gpu_pipeline(
     background_path = str(job_dir / "background_track.wav")
     target_transcription_audio = audio_path
 
-    # Demucs Source Separation
     if separate_stems:
         print(f"[{job_id}] Demucs Separation")
         demucs_worker = DemucsBackend(model_name="htdemucs", device="cuda")
@@ -234,7 +218,6 @@ def process_gpu_pipeline(
         gc.collect()
         torch.cuda.empty_cache()
 
-    # WhisperX Transcription
     print(f"[{job_id}] WhisperX Transcription")
     segments = transcribe_audio_whisperx_full(
         target_transcription_audio,
@@ -251,7 +234,6 @@ def process_gpu_pipeline(
     gc.collect()
     torch.cuda.empty_cache()
 
-    # Translation
     print(f"[{job_id}] Translation ({len(segments)} segments)")
     translated_segments = []
     for segment in segments:
@@ -261,7 +243,6 @@ def process_gpu_pipeline(
             "translated": translate_text(text, src_lang, tgt_lang) if text else "",
         })
 
-    # Zonos Voice Cloning
     print(f"[{job_id}] Zonos Voice Cloning")
     ref_source_path = vocals_path if separate_stems and os.path.exists(vocals_path) else audio_path
     source_audio = AudioSegment.from_file(ref_source_path)
@@ -278,7 +259,7 @@ def process_gpu_pipeline(
         reference_path = job_dir / f"ref_{index}.wav"
         output_path = job_dir / f"raw_seg_{index}.wav"
         
-        source_audio[start_ms:end_ms].export(reference_path, format="wav")
+        source_audio[start_ms:end_ms].export(str(reference_path), format="wav")
         generate_speech(
             text=translated_text,
             output_path=str(output_path),
@@ -335,7 +316,6 @@ def assemble_and_finish_container(
         stretched_file = os.path.join(job_dir, f"stretched_seg_{i}.wav")
         if actual_dur_ms > target_dur_ms and target_dur_ms > 100:
             speed_ratio = round(actual_dur_ms / target_dur_ms, 2)
-            # Safe clamping for FFmpeg atempo (must be between 0.5 and 2.0)
             speed_ratio = max(0.5, min(speed_ratio, 1.4))
             
             cmd = [
@@ -402,7 +382,7 @@ def run_modal_job(
     target_language: str,
     output_format: str,
     enhance_audio: bool,
-    *args,  # Catch-all for extra positional arguments to prevent TypeError
+    *args,
     **kwargs,
 ) -> dict:
     if "/root" not in sys.path:
@@ -422,7 +402,6 @@ def run_modal_job(
         job.status = "processing"
         db.commit()
 
-        # Invocations via .remote()
         working_audio_path = extract_audio_container.remote(job_id, source_path)
         
         translated_segments = process_gpu_pipeline.remote(
