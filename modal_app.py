@@ -60,14 +60,13 @@ l4_image = (
         "numpy<2.0.0",
         "torch==2.4.0",
         "torchaudio==2.4.0",
-        "torchvision==0.19.0",  # Added: Required by Pyannote/WhisperX pipeline internals
+        "torchvision==0.19.0",
         "ctranslate2>=4.4.0",
         "faster-whisper>=1.0.3",
         "transformers>=4.40.0,<4.48.0",
         "huggingface_hub",
         "hf_transfer",
-        # WhisperX/pyannote runtime dependencies
-        "pyannote.audio==3.3.1",
+        # Core runtime dependencies
         "pyannote.core",
         "pyannote.database",
         "pyannote.metrics",
@@ -81,8 +80,8 @@ l4_image = (
         "jiwer",
         "setuptools",
         # Zonos2 dependencies
-        "phonemizer",    # Added: Python wrapper for espeak-ng
-        "kanjize",       # Added: Zonos G2P support
+        "phonemizer",
+        "kanjize",
         "einops",
         "einx",
         "hydra-core",
@@ -105,9 +104,12 @@ l4_image = (
         "ninja>=1.11.0",
         "sacremoses>=0.1.1",
         "demucs",
-        "whisperx @ git+https://github.com/m-bain/whisperX.git",
     )
-    # Flash-attention and Mamba are compiled for Torch 2.4 / CUDA 12
+    # Bypass pyannote version conflict with speechbrain via --no-deps
+    .run_commands(
+        "pip install pyannote.audio==3.3.1 --no-deps",
+        "pip install whisperx @ git+https://github.com/m-bain/whisperX.git --no-deps"
+    )
     .pip_install(
         "causal-conv1d",
         "mamba-ssm",
