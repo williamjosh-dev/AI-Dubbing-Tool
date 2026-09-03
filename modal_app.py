@@ -53,6 +53,7 @@ l4_image = (
         "git",
         "espeak-ng",
         "libfst-dev",
+        "libsndfile1",
         "build-essential"
     )
     .pip_install(
@@ -64,6 +65,31 @@ l4_image = (
         "transformers>=4.40.0,<4.48.0",
         "huggingface_hub",
         "hf_transfer",
+        # WhisperX/pyannote runtime dependencies.  pyannote.audio is
+        # installed below with --no-deps, so these must be explicit.
+        "pyannote.audio==3.3.1",
+        "pyannote.core",
+        "pyannote.database",
+        "pyannote.metrics",
+        "asteroid-filterbanks",
+        "lightning",
+        "scipy",
+        "librosa",
+        "matplotlib",
+        "av",
+        "evaluate",
+        "jiwer",
+        "setuptools",
+        # Zonos2 is also installed with --no-deps below.
+        "einops",
+        "einx",
+        "hydra-core",
+        "inflect",
+        "pyyaml",
+        "safetensors",
+        "sentencepiece",
+        "tqdm",
+        "vocos",
         "soundfile",
         "pydub",
         "speechbrain==0.5.16",
@@ -77,10 +103,9 @@ l4_image = (
         "ninja>=1.11.0",
         "sacremoses>=0.1.1",
         "demucs",
+         "whisperx @ git+https://github.com/m-bain/whisperX.git",
     )
     .run_commands(
-        "pip install --no-deps git+https://github.com/m-bain/whisperX.git",
-        "pip install --no-deps pyannote.audio==3.3.1 --force-reinstall",
         "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2",
         "pip install --no-deps descript-audio-codec==1.0.0",
         "pip install /root/Zonos2 --no-deps"
@@ -159,7 +184,6 @@ def process_gpu_pipeline(
     separate_stems: bool = True,
 ) -> list[dict]:
     
-    import sys
     if "/root" not in sys.path:
         sys.path.insert(0, "/root")
 
@@ -344,8 +368,8 @@ def assemble_and_finish_container(
                 json={"job_id": job_id, "status": "COMPLETED", "download_url": public_url},
                 timeout=10,
             )
-        except Exception as e:
-            print(f"Webhook failed: {e}")
+        except requests.RequestException:
+            pass
 
     SHARED_VOLUME.commit()
     return {"audio_url": audio_url, "video_url": video_url, "download_url": public_url}
