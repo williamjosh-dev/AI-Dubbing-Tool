@@ -60,7 +60,7 @@ l4_image = (
     )
     # Target flash-attn precompiled wheel for Torch 2.4 / CUDA 12.1 if needed
     .pip_install("flash-attn", extra_options="--no-build-isolation")
-    .pip_install(
+  .pip_install(
         "numpy<2.0.0",
         "ctranslate2>=4.4.0",
         "faster-whisper>=1.0.3",
@@ -70,7 +70,8 @@ l4_image = (
         "pyannote.core",
         "pyannote.database",
         "pyannote.metrics",
-        "torch-audiomentations", 
+        "pyannote.pipeline",
+        "torch-audiomentations",
         "julius",
         "semver",
         "asteroid-filterbanks",
@@ -104,6 +105,8 @@ l4_image = (
         "msgpack",
         "sacremoses>=0.1.1",
         "demucs",
+        "pytorch-metric-learning",
+        "tensorboardX",
     )
     .run_commands(
         "pip install pyannote.audio==3.3.1 --no-deps",
