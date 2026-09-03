@@ -46,7 +46,7 @@ def download_demucs_weights():
 
 l4_image = (
     modal.Image.from_registry(
-        "nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11"
+        "nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11"
     )
     .apt_install(
         "ffmpeg",
@@ -60,13 +60,13 @@ l4_image = (
         "numpy<2.0.0",
         "torch==2.4.0",
         "torchaudio==2.4.0",
+        "torchvision==0.19.0",  # Added: Required by Pyannote/WhisperX pipeline internals
         "ctranslate2>=4.4.0",
         "faster-whisper>=1.0.3",
         "transformers>=4.40.0,<4.48.0",
         "huggingface_hub",
         "hf_transfer",
-        # WhisperX/pyannote runtime dependencies.  pyannote.audio is
-        # installed below with --no-deps, so these must be explicit.
+        # WhisperX/pyannote runtime dependencies
         "pyannote.audio==3.3.1",
         "pyannote.core",
         "pyannote.database",
@@ -80,7 +80,9 @@ l4_image = (
         "evaluate",
         "jiwer",
         "setuptools",
-        # Zonos2 is also installed with --no-deps below.
+        # Zonos2 dependencies
+        "phonemizer",    # Added: Python wrapper for espeak-ng
+        "kanjize",       # Added: Zonos G2P support
         "einops",
         "einx",
         "hydra-core",
@@ -103,7 +105,14 @@ l4_image = (
         "ninja>=1.11.0",
         "sacremoses>=0.1.1",
         "demucs",
-         "whisperx @ git+https://github.com/m-bain/whisperX.git",
+        "whisperx @ git+https://github.com/m-bain/whisperX.git",
+    )
+    # Flash-attention and Mamba are compiled for Torch 2.4 / CUDA 12
+    .pip_install(
+        "causal-conv1d",
+        "mamba-ssm",
+        "flash-attn",
+        extra_options="--no-build-isolation"
     )
     .run_commands(
         "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2",
