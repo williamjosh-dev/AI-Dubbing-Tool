@@ -109,7 +109,7 @@ l4_image = (
         "tensorboardX",
     )
     .run_commands(
-        "pip install pyannote.audio==3.3.1 --no-deps",
+        "pip install pyannote.audio==3.1.1 --no-deps",
         "pip install git+https://github.com/m-bain/whisperX.git --no-deps",
     )
     .run_commands(
