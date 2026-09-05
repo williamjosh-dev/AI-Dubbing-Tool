@@ -6,8 +6,9 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', 'config', 
 # Global Client
 _groq_client = None
 
-PRIMARY_MODEL = "qwen3.6-27b"       # High-speed, multilingual primary model
-FALLBACK_MODEL = "openai/gpt-oss-20b"  # High-rate-limit fallback model
+# Pure Qwen pipeline on Groq
+PRIMARY_MODEL = "qwen/qwen3.6-27b"
+FALLBACK_MODEL = "qwen/qwen3.8-27b"
 
 TRANSLATION_PROMPT = """Role: You are an expert natural speech translator.
 
@@ -85,7 +86,7 @@ def _fallback_deep_translator(text: str, src_lang: str, tgt_lang: str) -> str:
 
 def translate_text(text: str, src_lang: str = "es", tgt_lang: str = "en") -> str:
     """
-    Translate text using Groq with Qwen 2.5 32B primary, Llama 3.1 8B fallback,
+    Translate text using Groq with Qwen 3.6 27B primary, Qwen 3.8 27B secondary fallback,
     and deep-translator emergency fallback.
     """
     if not text or not text.strip():
@@ -98,17 +99,17 @@ def translate_text(text: str, src_lang: str = "es", tgt_lang: str = "en") -> str
         print(f"⚠️ Groq initialization error: {e}. Falling back to deep-translator...")
         return _fallback_deep_translator(text, src_lang, tgt_lang)
 
-    # Attempt 1: Primary Model (qwen-2.5-32b)
+    # Attempt 1: Primary Model (Qwen 3.6 27B)
     try:
         return _call_groq_translation(client, PRIMARY_MODEL, text, src_lang, tgt_lang)
     except Exception as e:
         print(f"⚠️ Primary model {PRIMARY_MODEL} failed: {e}")
 
-    # Attempt 2: Fallback Model (Llama-3.1-8b-instant)
+    # Attempt 2: Secondary Model (Qwen 3.8 27B)
     try:
         return _call_groq_translation(client, FALLBACK_MODEL, text, src_lang, tgt_lang)
     except Exception as e:
         print(f"⚠️ Fallback model {FALLBACK_MODEL} failed: {e}")
 
-    # Attempt 3: Free Web Translator Fallback
+    # Attempt 3: Free Web Translator Fallback (Google Translate)
     return _fallback_deep_translator(text, src_lang, tgt_lang)

@@ -58,9 +58,9 @@ l4_image = (
         "torchvision==0.19.0",
         index_url="https://download.pytorch.org/whl/cu121",
     )
-    # Target flash-attn precompiled wheel for Torch 2.4 / CUDA 12.1 if needed
+    # Target flash-attn precompiled wheel for Torch 2.4 / CUDA 12.1
     .pip_install("flash-attn", extra_options="--no-build-isolation")
-  .pip_install(
+    .pip_install(
         "numpy<2.0.0",
         "ctranslate2>=4.4.0",
         "faster-whisper>=1.0.3",
@@ -107,15 +107,19 @@ l4_image = (
         "demucs",
         "pytorch-metric-learning",
         "tensorboardX",
+        # --- Added Missing Zonos2 Dependencies ---
+        "pyzmq",                  # Required for zonos2.utils.mp
+        "descript-audio-codec",   # Audio codec for Zonos
+        "torchtune",              # Needed for model weights / MoE architecture
+        "deep-translator",        # Translation fallback
     )
     .run_commands(
         "pip install pyannote.audio==3.1.1 --no-deps",
         "pip install git+https://github.com/m-bain/whisperX.git --no-deps",
     )
     .run_commands(
-        "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2",
-        "pip install --no-deps descript-audio-codec==1.0.0",
-        "pip install /root/Zonos2 --no-deps",
+        "git clone https://github.com/Zyphra/ZONOS2.git /root/Zonos2",
+        "pip install -e /root/Zonos2 --no-deps",
     )
     .env(
         {
