@@ -13,6 +13,18 @@ import torch
 import whisperx
 from dotenv import load_dotenv
 from groq import Groq
+from pyannote.audio.core.inference import Inference
+
+# --- MONKEY PATCH FOR PYANNOTE 3.1.1 COMPATIBILITY ---
+_original_inference_init = Inference.__init__
+
+def _patched_inference_init(self, model, **kwargs):
+    kwargs.pop("token", None)
+    kwargs.pop("use_auth_token", None)
+    _original_inference_init(self, model, **kwargs)
+
+Inference.__init__ = _patched_inference_init
+# -----------------------------------------------------
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", "config", ".env"))
 
