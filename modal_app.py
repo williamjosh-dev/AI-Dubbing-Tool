@@ -127,6 +127,11 @@ l4_image = (
             "deep-translator",
             extra_options="--timeout 120"
         )
+            # numpy installation 
+        .pip_install(
+            "numpy>=2.0.2,<2.2.0",
+            extra_options="--timeout 120"
+        )
     # Speed up C++ compilation for flash-attn using multiple processor cores
     .run_commands("MAX_JOBS=4 pip install flash-attn --no-build-isolation --timeout 120")
     .run_commands(
