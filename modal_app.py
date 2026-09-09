@@ -93,6 +93,7 @@ l4_image = (
         "torchtune",
         "lightning",
         "scipy",
+        "sgl-kernel",
         extra_options="--timeout 120"
     )
     # Layer 4: Text Processing, Utilities & Rest of Dependencies
@@ -219,7 +220,9 @@ def process_gpu_pipeline(
     from backend.module.transcribe import transcribe_audio_whisperx_full
     from backend.module.translate import translate_text
     from backend.module.tts import generate_speech
-  #        ----   Demcus separation ----
+
+  #        ----   Demucs separation ----
+
     job_dir = Path(STORAGE_DIR) / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -246,7 +249,9 @@ def process_gpu_pipeline(
         del demucs_worker
         gc.collect()
         torch.cuda.empty_cache()
+
 #      -------- Whisper x transcription -----------------
+
     print(f"[{job_id}] WhisperX Transcription")
     segments = transcribe_audio_whisperx_full(
         target_transcription_audio,
@@ -262,7 +267,9 @@ def process_gpu_pipeline(
     MODEL_VOLUME.commit()
     gc.collect()
     torch.cuda.empty_cache()
+
     # --------- Translation --------------------- 
+
     print(f"[{job_id}] Translation ({len(segments)} segments)")
     translated_segments = []
     for segment in segments:
@@ -271,7 +278,9 @@ def process_gpu_pipeline(
             **segment,
             "translated": translate_text(text, src_lang, tgt_lang) if text else "",
         })
+
     # --------- Voice cloning ---------------------
+
     print(f"[{job_id}] Zonos Voice Cloning")
     ref_source_path = vocals_path if separate_stems and os.path.exists(vocals_path) else audio_path
     source_audio = AudioSegment.from_file(ref_source_path)

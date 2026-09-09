@@ -61,6 +61,7 @@ def _call_groq_translation(client, model: str, text: str, src_lang: str, tgt_lan
             {"role": "user", "content": text},
         ],
         temperature=0.2,
+        max_tokens=350,  # Caps expected output tokens under Groq's 1000 OTPM limit
     )
 
     result = response.choices[0].message.content.strip()
