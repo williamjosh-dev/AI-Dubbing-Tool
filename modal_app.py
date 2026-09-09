@@ -87,7 +87,7 @@ l4_image = (
     # Layer 3: Heavy Model requirements (Zonos2, Speechbrain, Demucs)
     .pip_install(
         "speechbrain==0.5.16",
-        "demucs-infer",
+        "demucs",
         "vocos",
         "descript-audio-codec",
         "torchtune",
