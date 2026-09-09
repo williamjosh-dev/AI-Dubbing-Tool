@@ -67,11 +67,6 @@ l4_image = (
             "hf_transfer",
             extra_options="--timeout 120"
         )
-                # numpy installation 
-        .pip_install(
-            "numpy>=2.0.2,<2.2.0",
-            extra_options="--timeout 120"
-        )
         # Layer 2: Audio Processing & Pyannote ecosystem
         .pip_install(
             "pyannote.core",
