@@ -124,9 +124,9 @@ l4_image = (
         "deep-translator",
         extra_options="--timeout 120"
     )
-       # numpy installation 
+
     .pip_install(
-        "numpy>=1.26.0,<2.0.0",  # Locks numpy to 1.26.x (safest bridge for all 3)
+        "numpy>=1.26.0,<2.0.0", # Locks numpy to 1.26.x (safest bridge for all 3)
     )
     # Flash Attention compilation (now compiles safely against NumPy 1.26)
     .run_commands("MAX_JOBS=4 pip install flash-attn --no-build-isolation --timeout 120")
