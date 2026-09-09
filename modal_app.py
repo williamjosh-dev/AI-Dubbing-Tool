@@ -124,8 +124,7 @@ l4_image = (
         )
             # numpy installation 
         .pip_install(
-            "numpy>=2.0.2,<2.2.0",
-            extra_options="--timeout 120"
+            "numpy>=1.26.0,<2.0.0",  # Locks numpy to 1.26.x (safest bridge for all 3)
         )
     # Speed up C++ compilation for flash-attn using multiple processor cores
     .run_commands("MAX_JOBS=4 pip install flash-attn --no-build-isolation --timeout 120")
