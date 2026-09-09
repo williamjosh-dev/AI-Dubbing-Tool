@@ -40,94 +40,98 @@ cpu_image = (
 # 2. L4 GPU IMAGE
 # ==========================================
 l4_image = (
-        modal.Image.from_registry("nvidia/cuda:12.1.1-devel-ubuntu22.04", add_python="3.11")
-        .apt_install(
-            "ffmpeg",
-            "git",
-            "espeak-ng",
-            "libfst-dev",
-            "libsndfile1",
-            "build-essential",
-            "g++",
-        )
-        # Upgrade pip and increase default timeouts globally to prevent these network drops
-        .pip_install("pip>=25.0", "wheel", "setuptools", "packaging", "ninja")
-        .pip_install(
-            "torch==2.4.0",
-            "torchaudio==2.4.0",
-            "torchvision==0.19.0",
-            index_url="https://download.pytorch.org/whl/cu121",
-        )
-            # Layer 1: Core Transformers & Whisper stack
-        .pip_install(
-            "ctranslate2>=4.4.0",
-            "faster-whisper>=1.0.3",
-            "transformers>=4.40.0,<4.48.0",
-            "huggingface_hub",
-            "hf_transfer",
-            extra_options="--timeout 120"
-        )
-        # Layer 2: Audio Processing & Pyannote ecosystem
-        .pip_install(
-            "pyannote.core",
-            "pyannote.database",
-            "pyannote.metrics",
-            "pyannote.pipeline",
-            "torch-audiomentations",
-            "julius",
-            "asteroid-filterbanks",
-            "librosa",
-            "soundfile",
-            "pydub",
-            "av",
-            extra_options="--timeout 120"
-        )
-        # Layer 3: Heavy Model requirements (Zonos2, Speechbrain, Demucs)
-        .pip_install(
-            "speechbrain==0.5.16",
-            "demucs-infer",
-            "vocos",
-            "descript-audio-codec",
-            "torchtune",
-            "lightning",
-            "scipy",
-            extra_options="--timeout 120"
-        )
-        # Layer 4: Text Processing, Utilities & Rest of Dependencies
-        .pip_install(
-            "semver",
-            "matplotlib",
-            "evaluate",
-            "jiwer",
-            "phonemizer",
-            "kanjize",
-            "einops",
-            "einx",
-            "hydra-core",
-            "inflect",
-            "pyyaml",
-            "safetensors",
-            "sentencepiece",
-            "tqdm",
-            "pandas>=2.2.0",
-            "nltk>=3.9.1",
-            "groq",
-            "protobuf>=5.0.0",
-            "python-dotenv>=1.0",
-            "msgpack",
-            "sacremoses>=0.1.1",
-            "pytorch-metric-learning",
-            "tensorboardX",
-            "pyzmq",
-            "deep-translator",
-            extra_options="--timeout 120"
-        )
-            # numpy installation 
-        .pip_install(
-            "numpy>=1.26.0,<2.0.0",  # Locks numpy to 1.26.x (safest bridge for all 3)
-        )
-    # Speed up C++ compilation for flash-attn using multiple processor cores
+    modal.Image.from_registry("nvidia/cuda:12.1.1-devel-ubuntu22.04", add_python="3.11")
+    .apt_install(
+        "ffmpeg",
+        "git",
+        "espeak-ng",
+        "libfst-dev",
+        "libsndfile1",
+        "build-essential",
+        "g++",
+    )
+    # Upgrade pip & lock NumPy FIRST so no intermediate layer installs NumPy 2.x
+    .pip_install("pip>=25.0", "wheel", "setuptools", "packaging", "ninja", "numpy>=1.26.0,<2.0.0")
+    
+    # Base PyTorch Stack
+    .pip_install(
+        "torch==2.4.0",
+        "torchaudio==2.4.0",
+        "torchvision==0.19.0",
+        index_url="https://download.pytorch.org/whl/cu121",
+    )
+    # Layer 1: Core Transformers & Whisper stack
+    .pip_install(
+        "ctranslate2>=4.4.0",
+        "faster-whisper>=1.0.3",
+        "transformers>=4.40.0,<4.48.0",
+        "huggingface_hub",
+        "hf_transfer",
+        extra_options="--timeout 120"
+    )
+    # Layer 2: Audio Processing & Pyannote ecosystem
+    .pip_install(
+        "pyannote.core",
+        "pyannote.database",
+        "pyannote.metrics",
+        "pyannote.pipeline",
+        "torch-audiomentations",
+        "julius",
+        "asteroid-filterbanks",
+        "librosa",
+        "soundfile",
+        "pydub",
+        "av",
+        extra_options="--timeout 120"
+    )
+    # Layer 3: Heavy Model requirements (Zonos2, Speechbrain, Demucs)
+    .pip_install(
+        "speechbrain==0.5.16",
+        "demucs-infer",
+        "vocos",
+        "descript-audio-codec",
+        "torchtune",
+        "lightning",
+        "scipy",
+        extra_options="--timeout 120"
+    )
+    # Layer 4: Text Processing, Utilities & Rest of Dependencies
+    .pip_install(
+        "semver",
+        "matplotlib",
+        "evaluate",
+        "jiwer",
+        "phonemizer",
+        "kanjize",
+        "einops",
+        "einx",
+        "hydra-core",
+        "inflect",
+        "pyyaml",
+        "safetensors",
+        "sentencepiece",
+        "tqdm",
+        "pandas>=2.2.0",
+        "nltk>=3.9.1",
+        "groq",
+        "protobuf>=5.0.0",
+        "python-dotenv>=1.0",
+        "msgpack",
+        "sacremoses>=0.1.1",
+        "pytorch-metric-learning",
+        "tensorboardX",
+        "pyzmq",
+        "deep-translator",
+        extra_options="--timeout 120"
+    )
+       # numpy installation 
+    .pip_install(
+        "numpy>=1.26.0,<2.0.0",  # Locks numpy to 1.26.x (safest bridge for all 3)
+    )
+    # Flash Attention compilation (now compiles safely against NumPy 1.26)
     .run_commands("MAX_JOBS=4 pip install flash-attn --no-build-isolation --timeout 120")
+    
+    # Standalone Repos (--no-deps)
     .run_commands(
         "pip install pyannote.audio==3.1.1 --no-deps",
         "pip install git+https://github.com/m-bain/whisperX.git --no-deps",
