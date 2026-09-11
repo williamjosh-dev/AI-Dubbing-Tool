@@ -199,6 +199,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     image=l4_image,
     gpu="L4",
     max_containers=1,
+    container_idle_timeout=15,
     volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
     timeout=1800,
