@@ -7,6 +7,8 @@ from pathlib import Path
 import modal
 import requests
 
+from backend.module.translate import translate_segments
+
 ROOT_DIR = Path(__file__).parent
 MODEL_VOLUME = modal.Volume.from_name("ai-models-cache", create_if_missing=True)
 SHARED_VOLUME = modal.Volume.from_name("dubbing-shared-storage", create_if_missing=True)
@@ -269,16 +271,15 @@ def process_gpu_pipeline(
     gc.collect()
     torch.cuda.empty_cache()
 
-    # --------- Translation --------------------- 
+    # --------- Translation ---------------------
 
     print(f"[{job_id}] Translation ({len(segments)} segments)")
-    translated_segments = []
-    for segment in segments:
-        text = segment.get("text", "").strip()
-        translated_segments.append({
-            **segment,
-            "translated": translate_text(text, src_lang, tgt_lang) if text else "",
-        })
+
+    translated_segments = translate_segments(
+        segments,
+        src_lang,
+        tgt_lang,
+    )
 
     # --------- Voice cloning ---------------------
 
