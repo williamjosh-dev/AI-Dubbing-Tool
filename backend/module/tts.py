@@ -10,6 +10,7 @@ _zonos_model = None
 _speaker_embeddings: dict[str, object] = {}
 
 # Zonos2 Language mapping table
+
 LANG_MAP = {
     # Tier 1
     "en": "en_us",
@@ -17,25 +18,44 @@ LANG_MAP = {
     "en-gb": "en_gb",
     "zh": "cmn",
     "zh-cn": "cmn",
+    "zh-hans": "cmn",
     "ja": "ja",
+
     # Tier 2
-    "es": "es",
-    "fr": "fr_fr",
-    "de": "de",
-    "it": "it",
-    "pt": "pt_br",
     "ko": "ko",
     "ru": "ru",
+    "it": "it",
+    "pt": "pt_br",
+    "pt-br": "pt_br",
+    "fr": "fr_fr",
+    "de": "de",
+    "es": "es",
+    "vi": "vi",
+    "he": "he",
     "nl": "nl",
-    # Tier 3 (Indic & others)
-    "bn": "bn",
+
+    # Tier 3
+    "sv": "sv",
     "hi": "hi",
     "ta": "ta",
     "te": "te",
+    "th": "th",
+    "no": "no",
+    "bn": "bn",
+    "tl": "tl",
     "ar": "ar",
+    "da": "da",
+    "id": "id",
     "pl": "pl",
     "uk": "uk",
-    "tr": "tr",
+    "ro": "ro",
+    "fi": "fi",
+    "hu": "hu",
+    "lt": "lt",
+    "et": "et",
+    "sk": "sk",
+    "hr": "hr",
+    "lv": "lv",
 }
 
 
@@ -101,7 +121,15 @@ def generate_speech(
         # Zonos2 handles native UTF-8 bytes directly
         result = model.generate_one(
             text=text,
-            params=TTSSamplingParams(),
+            params=TTSSamplingParams(
+                temperature=1.15,
+                top_k=106,
+                top_p=0.0,
+                min_p=0.18,
+                repetition_penalty=1.2,
+                max_tokens=1024,
+                seed=42
+            ),
             language=norm_lang,
             speaker_embedding=speaker_embedding,
         )
