@@ -281,25 +281,53 @@ def process_gpu_pipeline(
         tgt_lang,
     )
 
-    # --------- Voice cloning ---------------------
+# ---------- Voice cloning ---------------------
 
     print(f"[{job_id}] Zonos Voice Cloning")
-    ref_source_path = vocals_path if separate_stems and os.path.exists(vocals_path) else audio_path
+
+    ref_source_path = (
+        vocals_path
+        if separate_stems and os.path.exists(vocals_path)
+        else audio_path
+    )
+
+    # Use ONE stable reference for the whole job.
+    reference_path = job_dir / "voice_reference.wav"
+
     source_audio = AudioSegment.from_file(ref_source_path)
     audio_duration_ms = len(source_audio)
 
+    # Pick a reasonably clean reference rather than creating one per segment.
+    # Example: first 10 seconds, capped by the source duration.
+    reference_end_ms = min(audio_duration_ms, 10_000)
+
+    source_audio[:reference_end_ms].export(
+        str(reference_path),
+        format="wav",
+    )
+
     for index, segment in enumerate(translated_segments):
+
         translated_text = segment.get("translated", "").strip()
+
         if not translated_text:
             continue
 
-        start_ms = min(audio_duration_ms, max(0, int(segment.get("start", 0) * 1000)))
-        end_ms = min(audio_duration_ms, max(start_ms + 100, int(segment.get("end", 0) * 1000)))
-        
-        reference_path = job_dir / f"ref_{index}.wav"
+        start_ms = min(
+            audio_duration_ms,
+            max(0, int(float(segment.get("start", 0)) * 1000)),
+        )
+
+        end_ms = min(
+            audio_duration_ms,
+            max(
+                start_ms + 100,
+                int(float(segment.get("end", 0)) * 1000),
+            ),
+        )
+
         output_path = job_dir / f"raw_seg_{index}.wav"
-        
-        source_audio[start_ms:end_ms].export(str(reference_path), format="wav")
+
         generate_speech(
             text=translated_text,
             output_path=str(output_path),
@@ -308,6 +336,7 @@ def process_gpu_pipeline(
         )
 
     SHARED_VOLUME.commit()
+
     return translated_segments
 
 # -------------------------------------------------------------
