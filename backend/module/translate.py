@@ -1,30 +1,91 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', 'config', '.env'))
+load_dotenv(
+    dotenv_path=os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "config",
+        ".env",
+    )
+)
 
-# Global Client
+# Global client
 _groq_client = None
 
-# Pure Qwen pipeline on Groq
-PRIMARY_MODEL = "qwen/qwen3.6-27b"
-FALLBACK_MODEL = "qwen/qwen3.8-27b"
+# Groq Compound
+MODEL = "groq/compound"
 
-TRANSLATION_PROMPT = """Role: You are an expert natural speech translator.
+TRANSLATION_PROMPT = """\
+Role: You are an expert professional translator specializing in natural spoken
+dialogue and dubbing.
 
-Task: Translate the input text from source language '{src}' to target language '{tgt}'.
+Task:
+Translate the input from source language '{src}' into target language '{tgt}'.
 
-Speech & Audio Constraints:
-- Match the length and semantic meaning of the original segment as closely as possible.
-- Output ONLY the translated text. Do NOT add commentary, introductions, quotes, or markdown.
-- Do NOT add filler words (e.g., "uh," "well," "like") unless present in original text.
-- Absolutely NO bullet points, lists, emojis, asterisks, or formatting.
-- Spell out numbers, symbols, and currency as plain words (e.g., "one hundred dollars" instead of "$100", "percent" instead of "%")."""
+The translation must sound like something a fluent native speaker would
+actually say aloud.
+
+TRANSLATION PRINCIPLES:
+
+- Preserve the exact meaning, intent, context, emotion, and personality of
+  the original.
+- Translate naturally rather than word-for-word.
+- Preserve the speaker's tone and register: casual, formal, sarcastic,
+  emotional, angry, humorous, intimate, etc.
+- Translate idioms, expressions, metaphors, slang, jokes, and figurative
+  language into natural equivalents in the target language whenever possible.
+- NEVER translate an idiom literally if the literal version would sound
+  unnatural or change its intended meaning.
+- Do not invent information that is not present in the original.
+- Do not remove meaningful information from the original.
+- Resolve ambiguous wording using the surrounding context when possible.
+- Preserve names, proper nouns, and terminology unless a natural established
+  target-language equivalent is clearly appropriate.
+
+DUBBING / SPOKEN-LANGUAGE RULES:
+
+- Make the result sound natural when spoken aloud.
+- Prefer natural spoken phrasing over stiff written phrasing.
+- Preserve the original speaker's personality and conversational style.
+- Do NOT add filler words such as "uh", "um", "well", "like", etc. unless
+  they are present in the original or are genuinely necessary to preserve
+  the same conversational effect.
+- Do not artificially shorten or expand the translation just to change its
+  wording. Stay reasonably close to the original segment's length while
+  keeping the translation natural and accurate.
+- When several natural translations are possible, prefer the one that is
+  easiest and most natural to say aloud.
+- Do not turn natural dialogue into textbook or literal translation.
+
+AUDIO / TEXT OUTPUT RULES:
+
+- Output ONLY the translation.
+- Do NOT include explanations, notes, analysis, alternatives, or commentary.
+- Do NOT include the original text.
+- Do NOT add quotation marks around the translation.
+- Do NOT add markdown, bullets, numbering, asterisks, emojis, or labels.
+- Preserve paragraph or dialogue-segment boundaries when present.
+- Spell out numbers, symbols, and currencies in words when appropriate for
+  natural speech.
+  Example: "$100" -> "one hundred dollars"
+  Example: "25%" -> "twenty-five percent"
+
+IMPORTANT:
+This is a translation task, NOT a research task.
+Do not search the web.
+Do not visit websites.
+Do not execute code.
+Do not use external tools.
+Translate the supplied text directly.
+
+Return only the final target-language translation.
+"""
 
 
 def _get_groq_client():
     """
-    Get or create Groq client (singleton pattern).
+    Get or create the Groq client (singleton pattern).
     """
     global _groq_client
 
@@ -33,84 +94,181 @@ def _get_groq_client():
             from groq import Groq
 
             api_key = os.getenv("GROQ_API_KEY")
-            if not api_key:
-                raise ValueError("GROQ_API_KEY environment variable not set")
 
-            _groq_client = Groq(api_key=api_key)
+            if not api_key:
+                raise ValueError(
+                    "GROQ_API_KEY environment variable not set"
+                )
+
+            # Use the latest Compound system version.
+            _groq_client = Groq(
+                api_key=api_key,
+                default_headers={
+                    "Groq-Model-Version": "latest"
+                },
+            )
 
         except ImportError:
             raise ImportError(
                 "Groq SDK not installed. Run: pip install groq"
             )
+
         except Exception as e:
-            raise RuntimeError(f"Failed to initialize Groq client: {e}") from e
+            raise RuntimeError(
+                f"Failed to initialize Groq client: {e}"
+            ) from e
 
     return _groq_client
 
 
-def _call_groq_translation(client, model: str, text: str, src_lang: str, tgt_lang: str) -> str:
+def _call_groq_translation(
+    client,
+    model: str,
+    text: str,
+    src_lang: str,
+    tgt_lang: str,
+) -> str:
     """
-    Execute translation via Groq chat completion.
+    Execute direct translation through Groq Compound.
+
+    Compound tools are explicitly disabled because this is a pure
+    translation/dubbing task.
     """
-    system_prompt = TRANSLATION_PROMPT.format(src=src_lang, tgt=tgt_lang)
+
+    system_prompt = TRANSLATION_PROMPT.format(
+        src=src_lang,
+        tgt=tgt_lang,
+    )
 
     response = client.chat.completions.create(
         model=model,
         messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text},
+            {
+                "role": "system",
+                "content": system_prompt,
+            },
+            {
+                "role": "user",
+                "content": text,
+            },
         ],
+
+        # Keep translation deterministic and stable.
         temperature=0.2,
-        max_tokens=350,  # Caps expected output tokens under Groq's 1000 OTPM limit
+
+        # Preferred current Groq parameter.
+        max_completion_tokens=8192,
+
+        # IMPORTANT:
+        # Compound normally has access to web/code/etc.
+        # Disable all built-in tools for translation.
+        compound_custom={
+            "tools": {
+                "enabled_tools": []
+            }
+        },
     )
 
-    result = response.choices[0].message.content.strip()
-    # Strip any accidental wrapping quotes added by LLM
-    if (result.startswith('"') and result.endswith('"')) or (result.startswith("'") and result.endswith("'")):
+    result = response.choices[0].message.content or ""
+    result = result.strip()
+
+    # Remove accidental surrounding quotes only.
+    if (
+        len(result) >= 2
+        and (
+            (result.startswith('"') and result.endswith('"'))
+            or
+            (result.startswith("'") and result.endswith("'"))
+        )
+    ):
         result = result[1:-1].strip()
+
     return result
 
 
-def _fallback_deep_translator(text: str, src_lang: str, tgt_lang: str) -> str:
+def _fallback_deep_translator(
+    text: str,
+    src_lang: str,
+    tgt_lang: str,
+) -> str:
     """
-    Emergency fallback using deep-translator (Google Translate).
+    Emergency fallback using Google Translate through deep-translator.
     """
+
     try:
         from deep_translator import GoogleTranslator
-        print(f"🌐 Falling back to GoogleTranslator for segment: '{text[:20]}...'")
-        translated = GoogleTranslator(source=src_lang, target=tgt_lang).translate(text)
+
+        print(
+            f"🌐 Falling back to GoogleTranslator for segment: "
+            f"'{text[:40]}...'"
+        )
+
+        translated = GoogleTranslator(
+            source=src_lang,
+            target=tgt_lang,
+        ).translate(text)
+
         return translated.strip() if translated else text
+
     except Exception as e:
         print(f"❌ deep-translator fallback failed: {e}")
         return text
 
 
-def translate_text(text: str, src_lang: str = "es", tgt_lang: str = "en") -> str:
+def translate_text(
+    text: str,
+    src_lang: str = "es",
+    tgt_lang: str = "en",
+) -> str:
     """
-    Translate text using Groq with Qwen 3.6 27B primary, Qwen 3.8 27B secondary fallback,
-    and deep-translator emergency fallback.
+    Translate spoken dialogue using Groq Compound.
+
+    Primary:
+        groq/compound with all external tools disabled.
+
+    Fallback:
+        Google Translate via deep-translator.
     """
+
     if not text or not text.strip():
         return ""
 
-    client = None
     try:
         client = _get_groq_client()
-    except Exception as e:
-        print(f"⚠️ Groq initialization error: {e}. Falling back to deep-translator...")
-        return _fallback_deep_translator(text, src_lang, tgt_lang)
 
-    # Attempt 1: Primary Model (Qwen 3.6 27B)
+    except Exception as e:
+        print(
+            f"⚠️ Groq initialization error: {e}. "
+            "Falling back to deep-translator..."
+        )
+        return _fallback_deep_translator(
+            text,
+            src_lang,
+            tgt_lang,
+        )
+
     try:
-        return _call_groq_translation(client, PRIMARY_MODEL, text, src_lang, tgt_lang)
-    except Exception as e:
-        print(f"⚠️ Primary model {PRIMARY_MODEL} failed: {e}")
+        result = _call_groq_translation(
+            client=client,
+            model=MODEL,
+            text=text,
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+        )
 
-    # Attempt 2: Secondary Model (Qwen 3.8 27B)
-    try:
-        return _call_groq_translation(client, FALLBACK_MODEL, text, src_lang, tgt_lang)
-    except Exception as e:
-        print(f"⚠️ Fallback model {FALLBACK_MODEL} failed: {e}")
+        if result:
+            return result
 
-    # Attempt 3: Free Web Translator Fallback (Google Translate)
-    return _fallback_deep_translator(text, src_lang, tgt_lang)
+        print("⚠️ Groq returned an empty translation.")
+
+    except Exception as e:
+        print(
+            f"⚠️ Groq Compound translation failed: {e}"
+        )
+
+    # Emergency fallback
+    return _fallback_deep_translator(
+        text,
+        src_lang,
+        tgt_lang,
+    )
