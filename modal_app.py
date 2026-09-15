@@ -62,6 +62,10 @@ l4_image = (
         "torchvision==0.19.0",
         index_url="https://download.pytorch.org/whl/cu121",
     )
+    # Force sgl-kernel to compile explicitly for your CUDA/PyTorch combination
+    .run_commands(
+        "pip install sgl-kernel --no-build-isolation --no-cache-dir"
+    )
     # Layer 1: Core Transformers & Whisper stack
     .pip_install(
         "ctranslate2>=4.4.0",
@@ -95,7 +99,6 @@ l4_image = (
         "torchtune",
         "lightning",
         "scipy",
-        "sgl-kernel",
         extra_options="--timeout 120"
     )
     # Layer 4: Text Processing, Utilities & Rest of Dependencies
@@ -201,7 +204,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     image=l4_image,
     gpu="L4",
     max_containers=1,
-    container_idle_timeout=15,
+    scaledown_window=15,
     volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
     timeout=1800,
