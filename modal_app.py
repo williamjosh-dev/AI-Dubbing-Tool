@@ -41,6 +41,9 @@ cpu_image = (
 # ==========================================
 # 2. L4 GPU IMAGE
 # ==========================================
+# ==========================================
+# 2. L4 GPU IMAGE
+# ==========================================
 l4_image = (
     modal.Image.from_registry("nvidia/cuda:12.1.1-devel-ubuntu22.04", add_python="3.11")
     .apt_install(
@@ -52,21 +55,17 @@ l4_image = (
         "build-essential",
         "g++",
     )
-    # Upgrade pip & lock NumPy FIRST so no intermediate layer installs NumPy 2.x
+    # Upgrade pip & lock NumPy FIRST
     .pip_install("pip>=25.0", "wheel", "setuptools", "packaging", "ninja", "numpy>=1.26.0,<2.0.0")
     
-    # Base PyTorch Stack
+    # Base PyTorch Stack (CUDA 12.1)
     .pip_install(
         "torch==2.4.0",
         "torchaudio==2.4.0",
         "torchvision==0.19.0",
         index_url="https://download.pytorch.org/whl/cu121",
     )
-    # Force sgl-kernel to compile explicitly for your CUDA/PyTorch combination
-    .run_commands(
-        "pip install sgl-kernel --no-build-isolation --no-cache-dir"
-    )
-    # Layer 1: Core Transformers & Whisper stack
+    # Core Transformers & Whisper stack
     .pip_install(
         "ctranslate2>=4.4.0",
         "faster-whisper>=1.0.3",
@@ -75,7 +74,7 @@ l4_image = (
         "hf_transfer",
         extra_options="--timeout 120"
     )
-    # Layer 2: Audio Processing & Pyannote ecosystem
+    # Audio Processing & Pyannote Ecosystem
     .pip_install(
         "pyannote.core",
         "pyannote.database",
@@ -90,7 +89,7 @@ l4_image = (
         "av",
         extra_options="--timeout 120"
     )
-    # Layer 3: Heavy Model requirements (Zonos2, Speechbrain, Demucs)
+    # Heavy Model requirements
     .pip_install(
         "speechbrain==0.5.16",
         "demucs",
@@ -101,7 +100,7 @@ l4_image = (
         "scipy",
         extra_options="--timeout 120"
     )
-    # Layer 4: Text Processing, Utilities & Rest of Dependencies
+    # Text Processing & Utilities
     .pip_install(
         "semver",
         "matplotlib",
@@ -130,22 +129,28 @@ l4_image = (
         "deep-translator",
         extra_options="--timeout 120"
     )
+    # Lock NumPy strictly to 1.26.x before compiling CUDA C++ extensions
+    .pip_install("numpy>=1.26.0,<2.0.0")
 
-    .pip_install(
-        "numpy>=1.26.0,<2.0.0", # Locks numpy to 1.26.x (safest bridge for all 3)
+    # CUDA Kernels Compilation (sgl-kernel, flash-attn & flashinfer)
+    .run_commands(
+        "CUDA_HOME=/usr/local/cuda TORCH_CUDA_ARCH_LIST='8.9' pip install sgl-kernel --no-binary sgl-kernel --no-build-isolation --no-cache-dir",
+        "MAX_JOBS=4 CUDA_HOME=/usr/local/cuda TORCH_CUDA_ARCH_LIST='8.9' pip install flash-attn --no-build-isolation --timeout 120",
+        "pip install flashinfer -i https://flashinfer.ai/whl/cu121/torch2.4/ --no-deps"
     )
-    # Flash Attention compilation (now compiles safely against NumPy 1.26)
-    .run_commands("MAX_JOBS=4 pip install flash-attn --no-build-isolation --timeout 120")
     
-    # Standalone Repos (--no-deps)
+    # Standalone Repos & Zonos 2 Setup
     .run_commands(
         "pip install pyannote.audio==3.1.1 --no-deps",
         "pip install git+https://github.com/m-bain/whisperX.git --no-deps",
-    )
-    .run_commands(
         "git clone https://github.com/Zyphra/ZONOS2.git /root/Zonos2",
-        "pip install -e /root/Zonos2 --no-deps",
+        "cd /root/Zonos2 && pip install --no-build-isolation --no-deps -e .",
+        "python -c 'import nltk; nltk.download(\"punkt\"); nltk.download(\"punkt_tab\")'"
     )
+    # Verification Step during Modal Image Build
+    .run_commands("PYTHONPATH=/root/Zonos2/python:$PYTHONPATH python -c 'import zonos2; import sgl_kernel; print(\"Zonos 2 & sgl_kernel successfully imported!\")'")
+    
+    # Environment Variables
     .env(
         {
             "HF_HOME": f"{MODEL_CACHE_DIR}/huggingface",
@@ -155,6 +160,7 @@ l4_image = (
             "WHISPER_MODEL": "large-v3",
             "WHISPER_BATCH_SIZE": "4",
             "WHISPER_COMPUTE_TYPE": "float16",
+            "PYTHONPATH": "/root/backend:/root/Zonos2:/root/Zonos2/python",
         }
     )
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
