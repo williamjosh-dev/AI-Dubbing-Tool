@@ -139,9 +139,6 @@ l4_image = (
         "pip install flashinfer -i https://flashinfer.ai --no-deps"
     )
     
-
-
-    
     # Standalone Repos & Zonos 2 Setup
     .run_commands(
         "pip install pyannote.audio==3.1.1 --no-deps",
