@@ -41,9 +41,6 @@ cpu_image = (
 # ==========================================
 # 2. L4 GPU IMAGE
 # ==========================================
-# ==========================================
-# 2. L4 GPU IMAGE
-# ==========================================
 l4_image = (
     modal.Image.from_registry("nvidia/cuda:12.1.1-devel-ubuntu22.04", add_python="3.11")
     .apt_install(
@@ -132,12 +129,18 @@ l4_image = (
     # Lock NumPy strictly to 1.26.x before compiling CUDA C++ extensions
     .pip_install("numpy>=1.26.0,<2.0.0")
 
-    # CUDA Kernels Compilation (sgl-kernel, flash-attn & flashinfer)
+
+        # CUDA Kernels Compilation (sglang-kernel, flash-attn & flashinfer)
     .run_commands(
-        "CUDA_HOME=/usr/local/cuda TORCH_CUDA_ARCH_LIST='8.9' pip install sgl-kernel --no-binary sgl-kernel --no-build-isolation --no-cache-dir",
-        "MAX_JOBS=4 CUDA_HOME=/usr/local/cuda TORCH_CUDA_ARCH_LIST='8.9' pip install flash-attn --no-build-isolation --timeout 120",
-        "pip install flashinfer -i https://flashinfer.ai/whl/cu121/torch2.4/ --no-deps"
+        "pip install sgl-kernel --find-links https://github.com/sgl-project/whl/releases/",
+
+        "MAX_JOBS=4 CUDA_HOME=/usr/local/cuda TORCH_CUDA_ARCH_LIST='89' pip install flash-attn --no-build-isolation",
+        # 3. Download flashinfer matching your exact setup
+        "pip install flashinfer -i https://flashinfer.ai --no-deps"
     )
+    
+
+
     
     # Standalone Repos & Zonos 2 Setup
     .run_commands(
