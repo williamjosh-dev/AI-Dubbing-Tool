@@ -130,15 +130,19 @@ l4_image = (
     .pip_install("numpy>=1.26.0,<2.0.0")
 
 
-        # CUDA Kernels Compilation (sglang-kernel, flash-attn & flashinfer)
-    .run_commands(
-        "pip install sgl-kernel --find-links https://github.com/sgl-project/whl/releases/",
+.run_commands(
+        # 1. Install sgl-kernel without letting pip overwrite torch
+        "pip install sgl-kernel --no-deps",
 
-        "MAX_JOBS=4 CUDA_HOME=/usr/local/cuda TORCH_CUDA_ARCH_LIST='89' pip install flash-attn --no-build-isolation",
-        # 3. Download flashinfer matching your exact setup
-        "pip install flashinfer -i https://flashinfer.ai --no-deps"
+        # 2. Compile flash-attn using your pinned PyTorch build
+        "MAX_JOBS=4 CUDA_HOME=/usr/local/cuda TORCH_CUDA_ARCH_LIST='8.9' pip install flash-attn --no-build-isolation --no-deps",
+
+        # 3. Install FlashInfer from the PyTorch 2.4 specific wheel index
+        "pip install flashinfer-python -i https://flashinfer.ai/whl/cu124/torch2.4/ --no-deps"
+
+        .pip_install("sglang==0.4.4.post3", extra_options="--no-deps")
     )
-    
+        
     # Standalone Repos & Zonos 2 Setup
     .run_commands(
         "pip install pyannote.audio==3.1.1 --no-deps",
