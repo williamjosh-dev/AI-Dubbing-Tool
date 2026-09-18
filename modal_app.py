@@ -131,16 +131,14 @@ l4_image = (
 
 
 .run_commands(
-        # 1. Install sgl-kernel without letting pip overwrite torch
-        "pip install sgl-kernel --no-deps",
-
-        # 2. Compile flash-attn using your pinned PyTorch build
+        # Build sgl-kernel directly against PyTorch 2.4 ABI
+        "TORCH_CUDA_ARCH_LIST='8.9' MAX_JOBS=4 pip install git+https://github.com/sgl-project/sgl-kernel.git --no-build-isolation --no-deps",
+    
+        # Compile flash-attn using PyTorch 2.4
         "MAX_JOBS=4 CUDA_HOME=/usr/local/cuda TORCH_CUDA_ARCH_LIST='8.9' pip install flash-attn --no-build-isolation --no-deps",
-
-        # 3. Install FlashInfer from the PyTorch 2.4 specific wheel index
-        "pip install flashinfer-python -i https://flashinfer.ai/whl/cu124/torch2.4/ --no-deps"
-
-        .pip_install("sglang==0.4.4.post3", extra_options="--no-deps")
+    
+        # Install FlashInfer for PyTorch 2.4 cu121
+        "pip install flashinfer-python -i https://flashinfer.ai/whl/cu121/torch2.4/ --no-deps"
     )
         
     # Standalone Repos & Zonos 2 Setup
