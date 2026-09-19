@@ -39,15 +39,13 @@ cpu_image = (
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
 )
 # ==========================================
-# 2. L4 GPU IMAGE
+# WHISPERX + DEMUCS L4 GPU IMAGE
 # ==========================================
 l4_image = (
     modal.Image.from_registry("nvidia/cuda:12.1.1-devel-ubuntu22.04", add_python="3.11")
     .apt_install(
         "ffmpeg",
         "git",
-        "espeak-ng",
-        "libfst-dev",
         "libsndfile1",
         "build-essential",
         "g++",
@@ -86,29 +84,19 @@ l4_image = (
         "av",
         extra_options="--timeout 120"
     )
-    # Heavy Model requirements
+    # Demucs & Core Dependencies
     .pip_install(
-        "speechbrain==0.5.16",
         "demucs",
-        "vocos",
-        "descript-audio-codec",
-        "torchtune",
-        "lightning",
         "scipy",
         extra_options="--timeout 120"
     )
-    # Text Processing & Utilities
+    # Utilities & Translation
     .pip_install(
         "semver",
         "matplotlib",
         "evaluate",
         "jiwer",
-        "phonemizer",
-        "kanjize",
         "einops",
-        "einx",
-        "hydra-core",
-        "inflect",
         "pyyaml",
         "safetensors",
         "sentencepiece",
@@ -119,38 +107,21 @@ l4_image = (
         "protobuf>=5.0.0",
         "python-dotenv>=1.0",
         "msgpack",
-        "sacremoses>=0.1.1",
         "pytorch-metric-learning",
         "tensorboardX",
         "pyzmq",
         "deep-translator",
         extra_options="--timeout 120"
     )
-    # Lock NumPy strictly to 1.26.x before compiling CUDA C++ extensions
+    # Ensure NumPy stays pinned
     .pip_install("numpy>=1.26.0,<2.0.0")
 
-
-.run_commands(
-        # Build sgl-kernel directly against PyTorch 2.4 ABI
-        "TORCH_CUDA_ARCH_LIST='8.9' MAX_JOBS=4 pip install git+https://github.com/sgl-project/sgl-kernel.git --no-build-isolation --no-deps",
-    
-        # Compile flash-attn using PyTorch 2.4
-        "MAX_JOBS=4 CUDA_HOME=/usr/local/cuda TORCH_CUDA_ARCH_LIST='8.9' pip install flash-attn --no-build-isolation --no-deps",
-    
-        # Install FlashInfer for PyTorch 2.4 cu121
-        "pip install flashinfer-python -i https://flashinfer.ai/whl/cu121/torch2.4/ --no-deps"
-    )
-        
-    # Standalone Repos & Zonos 2 Setup
+    # Install Pyannote Audio and WhisperX directly
     .run_commands(
         "pip install pyannote.audio==3.1.1 --no-deps",
         "pip install git+https://github.com/m-bain/whisperX.git --no-deps",
-        "git clone https://github.com/Zyphra/ZONOS2.git /root/Zonos2",
-        "cd /root/Zonos2 && pip install --no-build-isolation --no-deps -e .",
         "python -c 'import nltk; nltk.download(\"punkt\"); nltk.download(\"punkt_tab\")'"
     )
-    # Verification Step during Modal Image Build
-    .run_commands("PYTHONPATH=/root/Zonos2/python:$PYTHONPATH python -c 'import zonos2; import sgl_kernel; print(\"Zonos 2 & sgl_kernel successfully imported!\")'")
     
     # Environment Variables
     .env(
@@ -162,9 +133,56 @@ l4_image = (
             "WHISPER_MODEL": "large-v3",
             "WHISPER_BATCH_SIZE": "4",
             "WHISPER_COMPUTE_TYPE": "float16",
-            "PYTHONPATH": "/root/backend:/root/Zonos2:/root/Zonos2/python",
+            "PYTHONPATH": "/root/backend",
         }
     )
+    .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
+)
+
+# ==========================================
+# 3. ZONOS 2 VOICE CLONING L4 GPU IMAGE
+# ==========================================
+zonos2_image = (
+    modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11")
+    .apt_install(
+        "ffmpeg", "git", "espeak-ng", "libfst-dev", "libsndfile1", "build-essential", "g++"
+    )
+    .pip_install("uv")
+    
+    # Clone Zonos2 repository
+    .run_commands(
+        "git clone https://github.com/Zyphra/Zonos2.git /root/Zonos2"
+    )
+    
+    # Sync locked dependencies system-wide without attempting root package isolation install
+    .run_commands(
+        "cd /root/Zonos2 && "
+        "TORCH_CUDA_ARCH_LIST='8.9' MAX_JOBS=4 CUDA_HOME=/usr/local/cuda "
+        "uv sync --system --frozen --no-build-isolation --no-install-project"
+    )
+    
+    # Install Zonos2 root package in editable mode
+    .run_commands(
+        "cd /root/Zonos2 && uv pip install --system --no-build-isolation --no-deps -e ."
+    )
+    
+    # NLTK tokenizers
+    .run_commands(
+        "python -c 'import nltk; nltk.download(\"punkt\"); nltk.download(\"punkt_tab\")'"
+    )
+    
+    # Import verification check during image build
+    .run_commands(
+        "PYTHONPATH=/root/Zonos2:/root/Zonos2/python python -c 'import zonos2; print(\"Zonos 2 & dependencies loaded successfully!\")'"
+    )
+    
+    .env({
+        "PYTHONPATH": "/root/backend:/root/Zonos2:/root/Zonos2/python",
+        "HF_HUB_ENABLE_HF_TRANSFER": "1",
+        "HF_HOME": f"{MODEL_CACHE_DIR}/huggingface",
+        "TORCH_HOME": f"{MODEL_CACHE_DIR}/torch",
+        "XDG_CACHE_HOME": f"{MODEL_CACHE_DIR}/cache",
+    })
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
 )
 
