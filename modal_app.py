@@ -200,10 +200,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     video_path = str(video_path).replace("\x00", "").strip()
 
     if len(video_path) > 1024:
-        raise ValueError(
-            f"video_path is unusually long ({len(video_path)} chars). "
-            "Ensure you are passing a file path, not raw binary/base64 data."
-        )
+        raise ValueError("video_path is unusually long. Ensure you are passing a file path.")
 
     SHARED_VOLUME.reload()
     job_dir = os.path.join(STORAGE_DIR, job_id)
@@ -223,8 +220,45 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     SHARED_VOLUME.commit()
     return extracted_wav
 
+
 # -------------------------------------------------------------
-# STEP 2: L4 GPU Worker Pipeline
+# STEP 2: Dedicated Zonos 2 Worker (Voice Cloning)
+# -------------------------------------------------------------
+@app.function(
+    image=zonos2_image,
+    gpu="L4",
+    scaledown_window=15,
+    volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
+    secrets=[modal.Secret.from_name("my-repo-secrets")],
+    timeout=600,
+)
+def generate_zonos_speech_worker(
+    text: str,
+    output_path: str,
+    reference_audio: str,
+    language: str
+):
+    """
+    Runs isolated inside the zonos2_image container where all 
+    sglang / flash-attn / zonos2 modules are pre-compiled and isolated.
+    """
+    SHARED_VOLUME.reload()
+    
+    # Import Zonos TTS inside this function scope
+    from backend.module.tts import generate_speech
+
+    generate_speech(
+        text=text,
+        output_path=output_path,
+        reference_audio=reference_audio,
+        language=language,
+    )
+    
+    SHARED_VOLUME.commit()
+
+
+# -------------------------------------------------------------
+# STEP 3: L4 GPU Worker Pipeline (Demucs + WhisperX + Translation)
 # -------------------------------------------------------------
 @app.function(
     image=l4_image,
@@ -250,11 +284,9 @@ def process_gpu_pipeline(
     from pydub import AudioSegment
     from backend.demcus_service import DemucsBackend
     from backend.module.transcribe import transcribe_audio_whisperx_full
-    from backend.module.translate import translate_text
-    from backend.module.tts import generate_speech
+    from backend.module.translate import translate_segments
 
-  #        ----   Demucs separation ----
-
+    # ---- 1. Demucs separation ----
     job_dir = Path(STORAGE_DIR) / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -282,8 +314,7 @@ def process_gpu_pipeline(
         gc.collect()
         torch.cuda.empty_cache()
 
-#      -------- Whisper x transcription -----------------
-
+    # ---- 2. WhisperX transcription ----
     print(f"[{job_id}] WhisperX Transcription")
     segments = transcribe_audio_whisperx_full(
         target_transcription_audio,
@@ -300,18 +331,15 @@ def process_gpu_pipeline(
     gc.collect()
     torch.cuda.empty_cache()
 
-    # --------- Translation ---------------------
-
+    # ---- 3. Translation ----
     print(f"[{job_id}] Translation ({len(segments)} segments)")
-
     translated_segments = translate_segments(
         segments,
         src_lang,
         tgt_lang,
     )
 
-# ---------- Voice cloning ---------------------
-
+    # ---- 4. Voice Cloning (Calls Zonos Container via Remote Execution) ----
     print(f"[{job_id}] Zonos Voice Cloning")
 
     ref_source_path = (
@@ -320,52 +348,35 @@ def process_gpu_pipeline(
         else audio_path
     )
 
-    # Use ONE stable reference for the whole job.
     reference_path = job_dir / "voice_reference.wav"
-
     source_audio = AudioSegment.from_file(ref_source_path)
     audio_duration_ms = len(source_audio)
 
-    # Pick a reasonably clean reference rather than creating one per segment.
-    # Example: first 10 seconds, capped by the source duration.
     reference_end_ms = min(audio_duration_ms, 10_000)
-
     source_audio[:reference_end_ms].export(
         str(reference_path),
         format="wav",
     )
 
+    SHARED_VOLUME.commit()
+
     for index, segment in enumerate(translated_segments):
-
         translated_text = segment.get("translated", "").strip()
-
         if not translated_text:
             continue
 
-        start_ms = min(
-            audio_duration_ms,
-            max(0, int(float(segment.get("start", 0)) * 1000)),
-        )
+        output_path = str(job_dir / f"raw_seg_{index}.wav")
 
-        end_ms = min(
-            audio_duration_ms,
-            max(
-                start_ms + 100,
-                int(float(segment.get("end", 0)) * 1000),
-            ),
-        )
-
-        output_path = job_dir / f"raw_seg_{index}.wav"
-
-        generate_speech(
+        # Invoke the dedicated Zonos 2 container remotely!
+        generate_zonos_speech_worker.remote(
             text=translated_text,
-            output_path=str(output_path),
+            output_path=output_path,
             reference_audio=str(reference_path),
             language=tgt_lang,
         )
 
     SHARED_VOLUME.commit()
-
+    
     return translated_segments
 
 # -------------------------------------------------------------
