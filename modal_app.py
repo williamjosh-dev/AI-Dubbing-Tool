@@ -143,11 +143,11 @@ l4_image = (
 # 3. ZONOS 2 VOICE CLONING L4 GPU IMAGE
 # ==========================================
 zonos2_image = (
-    modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11")
+    modal.Image.from_registry("nvidia/cuda:12.8.0-devel-ubuntu22.04", add_python="3.11")
     .apt_install(
         "ffmpeg", "git", "espeak-ng", "libfst-dev", "libsndfile1", "build-essential", "g++"
     )
-    .pip_install("uv")
+    .pip_install("uv==0.12.17")
     
     # Clone Zonos2 repository
     .run_commands(
@@ -160,7 +160,10 @@ zonos2_image = (
         "TORCH_CUDA_ARCH_LIST='8.9' MAX_JOBS=4 CUDA_HOME=/usr/local/cuda "
         "uv sync --system --frozen --no-build-isolation --no-install-project"
     )
-    
+    .run_commands(
+        "cd /root/Zonos2 && "
+        "uv audit --frozen"
+    )
     # Install Zonos2 root package in editable mode
     .run_commands(
         "cd /root/Zonos2 && uv pip install --system --no-build-isolation --no-deps -e ."
