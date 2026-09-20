@@ -227,6 +227,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
 @app.function(
     image=zonos2_image,
     gpu="L4",
+    max_containers=1,
     scaledown_window=15,
     volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
