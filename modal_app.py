@@ -238,7 +238,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
 @app.function(
     image=zonos2_image,
     gpu="L4",
-    max_containers=1,
+    max_containers=3,
     scaledown_window=15,
     volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
@@ -351,9 +351,8 @@ def process_gpu_pipeline(
         tgt_lang,
     )
 
-    # ---- 4. Voice Cloning (Calls Zonos Container via Remote Execution) ----
-    print(f"[{job_id}] Zonos Voice Cloning")
-
+        # ---- 4. Voice Cloning (Parallel Testing Mode) ----
+    print(f"[{job_id}] Zonos Voice Cloning - Preparing Test Truncation")
     ref_source_path = (
         vocals_path
         if separate_stems and os.path.exists(vocals_path)
@@ -363,7 +362,6 @@ def process_gpu_pipeline(
     reference_path = job_dir / "voice_reference.wav"
     source_audio = AudioSegment.from_file(ref_source_path)
     audio_duration_ms = len(source_audio)
-
     reference_end_ms = min(audio_duration_ms, 10_000)
     source_audio[:reference_end_ms].export(
         str(reference_path),
@@ -372,23 +370,38 @@ def process_gpu_pipeline(
 
     SHARED_VOLUME.commit()
 
+    # 1. Collect all valid segments into parallel lists
+    texts = []
+    output_paths = []
+    reference_audios = []
+    languages = []
+
     for index, segment in enumerate(translated_segments):
         translated_text = segment.get("translated", "").strip()
         if not translated_text:
             continue
+        
+        texts.append(translated_text)
+        output_paths.append(str(job_dir / f"raw_seg_{index}.wav"))
+        reference_audios.append(str(reference_path))
+        languages.append(tgt_lang)
 
-        output_path = str(job_dir / f"raw_seg_{index}.wav")
-
-        # Invoke the dedicated Zonos 2 container remotely!
-        generate_zonos_speech_worker.remote(
-            text=translated_text,
-            output_path=output_path,
-            reference_audio=str(reference_path),
-            language=tgt_lang,
-        )
+    # 2. Fire them into the Modal parallel queue all at once
+    if texts:
+        print(f"[{job_id}] Sending {len(texts)} segments concurrently to Zonos workers...")
+        
+        # Modal maps the lists across your worker containers dynamically
+        list(generate_zonos_speech_worker.map(
+            texts, 
+            output_paths, 
+            reference_audios, 
+            languages
+        ))
+        
+        print(f"[{job_id}] All Zonos generations completed successfully!")
 
     SHARED_VOLUME.commit()
-    
+
     return translated_segments
 
 # -------------------------------------------------------------
