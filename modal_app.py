@@ -111,6 +111,9 @@ l4_image = (
         "tensorboardX",
         "pyzmq",
         "deep-translator",
+        "pytorch_lightning",
+        "rich",
+        "omegaconf",
         extra_options="--timeout 120"
     )
     # Ensure NumPy stays pinned
@@ -179,7 +182,7 @@ zonos2_image = (
     
     # NLTK tokenizers
     .run_commands(
-        "python -c 'import nltk; nltk.download(\"punkt\"); nltk.download(\"punkt_tab\")'"
+        "pip install nltk && python -c 'import nltk; nltk.download(\"punkt\"); nltk.download(\"punkt_tab\")'"
     )
     
     # Import verification check during image build
@@ -240,7 +243,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     gpu="L4",
     max_containers=3,
     scaledown_window=15,
-    volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
+    volumes={"/root/models": MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
     timeout=600,
 )

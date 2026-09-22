@@ -13,7 +13,7 @@ load_dotenv(
 
 _groq_client = None
 
-MODEL = "groq/compound"
+MODEL = "openai/gpt-oss-20b"
 
 # Number of subtitle/dialogue segments sent in one Groq request.
 # 15 is a good starting point for dubbing.
