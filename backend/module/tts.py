@@ -120,15 +120,14 @@ def generate_speech(
     try:
         # Zonos2 handles native UTF-8 bytes directly
         result = model.generate_one(
-            text=text,
-            params=TTSSamplingParams(
+            text,
+            TTSSamplingParams(
                 temperature=1.15,
-                top_k=106,
                 top_p=0.0,
                 min_p=0.18,
                 repetition_penalty=1.2,
                 max_tokens=1024,
-                seed=42
+                seed=42,
             ),
             language=norm_lang,
             speaker_embedding=speaker_embedding,

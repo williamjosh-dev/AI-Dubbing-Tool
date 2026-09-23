@@ -178,10 +178,11 @@ zonos2_image = (
         "cd /root/Zonos2 && uv pip install --system --no-build-isolation --no-deps -e ."
     )
     
-    # NLTK tokenizers
+        # Install NLTK tokenizers and missing backend dependencies
     .run_commands(
-        "pip install nltk && python -c 'import nltk; nltk.download(\"punkt\"); nltk.download(\"punkt_tab\")'"
+        "pip install nltk python-dotenv hf_transfer && python -c 'import nltk; nltk.download(\"punkt\"); nltk.download(\"punkt_tab\")'"
     )
+
      .run_commands(
         "pip install --force-reinstall 'protobuf>=4.25.0,<5.0.0'"
     )
@@ -242,7 +243,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
 @app.cls(
     image=zonos2_image,
     gpu="L4",
-    max_containers=3,
+    max_containers=2,
     scaledown_window=15,
     volumes={"/root/models": MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
