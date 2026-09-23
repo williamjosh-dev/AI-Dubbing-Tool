@@ -184,6 +184,9 @@ zonos2_image = (
     .run_commands(
         "pip install nltk && python -c 'import nltk; nltk.download(\"punkt\"); nltk.download(\"punkt_tab\")'"
     )
+     .run_commands(
+        "pip install --system --force-reinstall 'protobuf>=4.25.0,<5.0.0'"
+    )
     
     # Import verification check during image build
     .run_commands(
@@ -238,40 +241,47 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
 # -------------------------------------------------------------
 # STEP 2: Dedicated Zonos 2 Worker (Voice Cloning)
 # -------------------------------------------------------------
-@app.function(
+@app.cls(
     image=zonos2_image,
     gpu="L4",
     max_containers=3,
+    concurrency_limit=3,          # Ensures requests wait for warm execution
+    container_idle_timeout=120,   # Keeps containers warm for 2 minutes
     scaledown_window=15,
     volumes={"/root/models": MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
     timeout=600,
 )
-def generate_zonos_speech_worker(
-    text: str,
-    output_path: str,
-    reference_audio: str,
-    language: str
-):
-    """
-    Runs isolated inside the zonos2_image container where all 
-    sglang / flash-attn / zonos2 modules are pre-compiled and isolated.
-    """
-    SHARED_VOLUME.reload()
-    
-    # Import Zonos TTS inside this function scope
-    from backend.module.tts import generate_speech
+class ZonosSpeechWorker:
+    @modal.enter()
+    def setup(self):
+        """Pre-loads Zonos model, weights, and dependencies once on container boot."""
+        SHARED_VOLUME.reload()
+        
+        # Pre-import and initialize TTS model context into self.generate_speech
+        from backend.module.tts import generate_speech
+        self.generate_speech = generate_speech
 
-    generate_speech(
-        text=text,
-        output_path=output_path,
-        reference_audio=reference_audio,
-        language=language,
-    )
-    
-    SHARED_VOLUME.commit()
+    @modal.method()
+    def generate(
+        self,
+        text: str,
+        output_path: str,
+        reference_audio: str,
+        language: str
+    ):
+        """Executes voice cloning instantly on warm GPU context."""
+        SHARED_VOLUME.reload()
 
+        self.generate_speech(
+            text=text,
+            output_path=output_path,
+            reference_audio=reference_audio,
+            language=language,
+        )
 
+        SHARED_VOLUME.commit()
+        
 # -------------------------------------------------------------
 # STEP 3: L4 GPU Worker Pipeline (Demucs + WhisperX + Translation)
 # -------------------------------------------------------------
