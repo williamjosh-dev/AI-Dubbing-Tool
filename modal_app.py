@@ -185,7 +185,7 @@ zonos2_image = (
         "pip install nltk && python -c 'import nltk; nltk.download(\"punkt\"); nltk.download(\"punkt_tab\")'"
     )
      .run_commands(
-        "pip install --system --force-reinstall 'protobuf>=4.25.0,<5.0.0'"
+        "pip install --force-reinstall 'protobuf>=4.25.0,<5.0.0'"
     )
     
     # Import verification check during image build
@@ -245,14 +245,12 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     image=zonos2_image,
     gpu="L4",
     max_containers=3,
-    concurrency_limit=3,          # Ensures requests wait for warm execution
-    container_idle_timeout=120,   # Keeps containers warm for 2 minutes
     scaledown_window=15,
     volumes={"/root/models": MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
     timeout=600,
 )
-class ZonosSpeechWorker:
+class generate_zonos_speech_worker:
     @modal.enter()
     def setup(self):
         """Pre-loads Zonos model, weights, and dependencies once on container boot."""
