@@ -7,8 +7,6 @@ from pathlib import Path
 import modal
 import requests
 
-from backend.module.translate import translate_segments
-
 ROOT_DIR = Path(__file__).parent
 MODEL_VOLUME = modal.Volume.from_name("ai-models-cache", create_if_missing=True)
 SHARED_VOLUME = modal.Volume.from_name("dubbing-shared-storage", create_if_missing=True)
