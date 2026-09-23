@@ -402,7 +402,7 @@ def process_gpu_pipeline(
         print(f"[{job_id}] Sending {len(texts)} segments concurrently to Zonos workers...")
         
         # Modal maps the lists across your worker containers dynamically
-        list(generate_zonos_speech_worker.map(
+        list(generate_zonos_speech_worker().generate.map(
             texts, 
             output_paths, 
             reference_audios, 
