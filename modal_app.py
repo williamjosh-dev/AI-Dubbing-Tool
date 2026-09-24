@@ -145,8 +145,16 @@ l4_image = (
 # ==========================================
 def bake_zonos_dependencies():
     """Pre-downloads Hugging Face models and compiles NeMo FST grammars during build time."""
+    import sys
+    # Add Zonos2 and its vendored libraries to Python's import search path
+    sys.path.extend([
+        "/root/Zonos2",
+        "/root/Zonos2/python",
+        "/root/Zonos2/python/zonos2/vendor"
+    ])
+
     from huggingface_hub import snapshot_download
-    from nemo_text_processing.text_normalization.normalize import Normalizer #type : ignore
+    from nemo_text_processing.text_normalization.normalize import Normalizer
 
     print("--> Baking Hugging Face weights into image...")
     snapshot_download("Zyphra/ZONOS2")
@@ -214,8 +222,11 @@ zonos2_image = (
         "TORCH_HOME": f"{MODEL_CACHE_DIR}/torch",
         "XDG_CACHE_HOME": f"{MODEL_CACHE_DIR}/cache",
     })
-    .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
+
     .run_function(bake_zonos_dependencies)
+
+    .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
+
 )
 
 app = modal.App("ai-dubbing-full-pipeline")
@@ -259,7 +270,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
 @app.cls(
     image=zonos2_image,
     gpu="L4",
-    max_containers=2,
+    max_containers=1,
     scaledown_window=15,
     volumes={"/root/models": MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
