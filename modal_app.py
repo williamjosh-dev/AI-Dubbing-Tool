@@ -536,6 +536,9 @@ def run_modal_job(
 
     job_dir = Path(STORAGE_DIR) / job_id
     SHARED_VOLUME.reload()
+
+    job_dir.mkdir(parents=True, exist_ok=True)
+    
     db = SessionLocal()
     job = db.query(Job).filter(Job.job_id == job_id).first()
     if not job:
