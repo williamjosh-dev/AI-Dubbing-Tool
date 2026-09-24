@@ -141,6 +141,21 @@ l4_image = (
 )
 
 # ==========================================
+# BUILD-TIME HELPER FUNCTION
+# ==========================================
+def bake_zonos_dependencies():
+    """Pre-downloads Hugging Face models and compiles NeMo FST grammars during build time."""
+    from huggingface_hub import snapshot_download
+    from nemo_text_processing.text_normalization.normalize import Normalizer #type : ignore
+
+    print("--> Baking Hugging Face weights into image...")
+    snapshot_download("Zyphra/ZONOS2")
+    snapshot_download("marksverdhei/Qwen3-Voice-Embedding-12Hz-1.7B")
+
+    print("--> Pre-compiling NeMo text normalization grammars...")
+    Normalizer(input_case="cased", lang="en")
+
+# ==========================================
 # 3. ZONOS 2 VOICE CLONING L4 GPU IMAGE
 # ==========================================
 zonos2_image = (
@@ -200,6 +215,7 @@ zonos2_image = (
         "XDG_CACHE_HOME": f"{MODEL_CACHE_DIR}/cache",
     })
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
+    .run_function(bake_zonos_dependencies)
 )
 
 app = modal.App("ai-dubbing-full-pipeline")
@@ -252,11 +268,16 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
 class generate_zonos_speech_worker:
     @modal.enter()
     def setup(self):
-        """Pre-loads Zonos model, weights, and dependencies once on container boot."""
+        """Runs once when container boots. Pre-loads model into VRAM."""
         SHARED_VOLUME.reload()
         
-        # Pre-import and initialize TTS model context into self.generate_speech
-        from backend.module.tts import generate_speech
+        # Import your helper and main generation function
+        from backend.module.tts import _get_zonos_model, generate_speech
+        
+        print("Pre-warming Zonos2 model into GPU memory...")
+        # 1. Triggers VRAM loading, CUDA graph capturing, etc. right now on boot!
+        _get_zonos_model()
+        
         self.generate_speech = generate_speech
 
     @modal.method()
@@ -267,9 +288,11 @@ class generate_zonos_speech_worker:
         reference_audio: str,
         language: str
     ):
-        """Executes voice cloning instantly on warm GPU context."""
+        """Executes instantly because model is already in VRAM."""
         SHARED_VOLUME.reload()
 
+        # 2. generate_speech will call _get_zonos_model() internally, 
+        # which returns the pre-loaded global instance without delay!
         self.generate_speech(
             text=text,
             output_path=output_path,
