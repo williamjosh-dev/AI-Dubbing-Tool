@@ -20,22 +20,45 @@ import {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
-const sourceLanguages = [
+const supportedLanguages = [
     { label: 'English', value: 'en' },
+    { label: 'Chinese', value: 'zh' },
     { label: 'Spanish', value: 'es' },
     { label: 'French', value: 'fr' },
     { label: 'German', value: 'de' },
+    { label: 'Italian', value: 'it' },
     { label: 'Hindi', value: 'hi' },
-];
-
-const targetLanguages = [
-    { label: 'English', value: 'en' },
-    { label: 'Spanish', value: 'es' },
-    { label: 'French', value: 'fr' },
     { label: 'Arabic', value: 'ar' },
     { label: 'Portuguese', value: 'pt' },
     { label: 'Japanese', value: 'ja' },
+    { label: 'Korean', value: 'ko' },
+    { label: 'Russian', value: 'ru' },
+    { label: 'Vietnamese', value: 'vi' },
+    { label: 'Hebrew', value: 'he' },
+    { label: 'Dutch', value: 'nl' },
+    { label: 'Swedish', value: 'sv' },
+    { label: 'Tamil', value: 'ta' },
+    { label: 'Telugu', value: 'te' },
+    { label: 'Thai', value: 'th' },
+    { label: 'Norwegian', value: 'no' },
+    { label: 'Bengali', value: 'bn' },
+    { label: 'Tagalog', value: 'tl' },
+    { label: 'Danish', value: 'da' },
+    { label: 'Indonesian', value: 'id' },
+    { label: 'Polish', value: 'pl' },
+    { label: 'Ukrainian', value: 'uk' },
+    { label: 'Romanian', value: 'ro' },
+    { label: 'Finnish', value: 'fi' },
+    { label: 'Hungarian', value: 'hu' },
+    { label: 'Lithuanian', value: 'lt' },
+    { label: 'Estonian', value: 'et' },
+    { label: 'Slovak', value: 'sk' },
+    { label: 'Croatian', value: 'hr' },
+    { label: 'Latvian', value: 'lv' },
 ];
+
+const sourceLanguages = supportedLanguages;
+const targetLanguages = supportedLanguages;
 
 const voiceMethods = [
     { label: 'Zonos 2 voice cloning', value: 'zonos2' },
@@ -334,41 +357,51 @@ export default function DubbingPage() {
                         </div>
 
                         <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
-                            <label className="block rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                                 <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                                     <Languages className="h-4 w-4 text-indigo-600" />
                                     Source language
                                 </span>
-                                <select
-                                    value={selectedSource}
-                                    onChange={(event) => setSelectedSource(event.target.value)}
-                                    className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-                                >
+                                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="Source language">
                                     {sourceLanguages.map((language) => (
-                                        <option key={language.value} value={language.value}>
+                                        <button
+                                            key={language.value}
+                                            type="button"
+                                            aria-pressed={selectedSource === language.value}
+                                            onClick={() => setSelectedSource(language.value)}
+                                            className={`min-h-10 rounded-lg border px-3 py-2 text-left text-sm font-medium transition-all duration-200 ${selectedSource === language.value
+                                                ? 'border-indigo-600 bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-200 ring-offset-1'
+                                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:-translate-y-0.5 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700'
+                                                }`}
+                                        >
                                             {language.label}
-                                        </option>
+                                        </button>
                                     ))}
-                                </select>
-                            </label>
+                                </div>
+                            </div>
 
-                            <label className="block rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                                 <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                                     <Languages className="h-4 w-4 text-indigo-600" />
                                     Target language
                                 </span>
-                                <select
-                                    value={selectedTarget}
-                                    onChange={(event) => setSelectedTarget(event.target.value)}
-                                    className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-                                >
+                                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="Target language">
                                     {targetLanguages.map((language) => (
-                                        <option key={language.value} value={language.value}>
+                                        <button
+                                            key={language.value}
+                                            type="button"
+                                            aria-pressed={selectedTarget === language.value}
+                                            onClick={() => setSelectedTarget(language.value)}
+                                            className={`min-h-10 rounded-lg border px-3 py-2 text-left text-sm font-medium transition-all duration-200 ${selectedTarget === language.value
+                                                ? 'border-sky-600 bg-sky-600 text-white shadow-md shadow-sky-200 ring-2 ring-sky-200 ring-offset-1'
+                                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:-translate-y-0.5 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700'
+                                                }`}
+                                        >
                                             {language.label}
-                                        </option>
+                                        </button>
                                     ))}
-                                </select>
-                            </label>
+                                </div>
+                            </div>
                         </div>
 
                         <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
