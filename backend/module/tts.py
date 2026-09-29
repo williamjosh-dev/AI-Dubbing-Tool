@@ -12,7 +12,6 @@ _speaker_embeddings: dict[str, object] = {}
 # Zonos2 Language mapping table
 
 LANG_MAP = {
-    # Tier 1
     "en": "en_us",
     "en-us": "en_us",
     "en-gb": "en_gb",
@@ -20,43 +19,27 @@ LANG_MAP = {
     "zh-cn": "cmn",
     "zh-hans": "cmn",
     "ja": "ja",
-
-    # Tier 2
     "ko": "ko",
-    "ru": "ru",
     "it": "it",
     "pt": "pt_br",
     "pt-br": "pt_br",
     "fr": "fr_fr",
     "de": "de",
     "es": "es",
-    "vi": "vi",
-    "he": "he",
-    "nl": "nl",
-
-    # Tier 3
-    "sv": "sv",
-    "hi": "hi",
-    "ta": "ta",
-    "te": "te",
-    "th": "th",
-    "no": "no",
-    "bn": "bn",
-    "tl": "tl",
-    "ar": "ar",
-    "da": "da",
-    "id": "id",
-    "pl": "pl",
-    "uk": "uk",
-    "ro": "ro",
-    "fi": "fi",
-    "hu": "hu",
-    "lt": "lt",
-    "et": "et",
-    "sk": "sk",
-    "hr": "hr",
-    "lv": "lv",
 }
+
+ZONOS_SUPPORTED_CODES = frozenset({
+    "en_us",
+    "en_gb",
+    "fr_fr",
+    "de",
+    "es",
+    "it",
+    "pt_br",
+    "ja",
+    "cmn",
+    "ko",
+})
 
 
 def _get_zonos_model():
@@ -104,6 +87,11 @@ def generate_speech(
     # Normalize language string to Zonos2 format
     raw_lang = (language or "en_us").lower().strip()
     norm_lang = LANG_MAP.get(raw_lang, raw_lang)
+    if norm_lang not in ZONOS_SUPPORTED_CODES:
+        supported = ", ".join(sorted(ZONOS_SUPPORTED_CODES))
+        raise ValueError(
+            f"Unsupported Zonos2 target language '{raw_lang}'. Supported codes: {supported}."
+        )
 
     model = _get_zonos_model()
     reference_key = str(Path(reference_audio).resolve())

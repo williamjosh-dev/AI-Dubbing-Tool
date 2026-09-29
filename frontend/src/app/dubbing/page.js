@@ -58,7 +58,17 @@ const supportedLanguages = [
 ];
 
 const sourceLanguages = supportedLanguages;
-const targetLanguages = supportedLanguages;
+const targetLanguages = [
+    { label: 'English', value: 'en' },
+    { label: 'Chinese', value: 'zh' },
+    { label: 'Spanish', value: 'es' },
+    { label: 'French', value: 'fr' },
+    { label: 'German', value: 'de' },
+    { label: 'Italian', value: 'it' },
+    { label: 'Portuguese', value: 'pt' },
+    { label: 'Japanese', value: 'ja' },
+    { label: 'Korean', value: 'ko' },
+];
 
 const voiceMethods = [
     { label: 'Zonos 2 voice cloning', value: 'zonos2' },
@@ -383,8 +393,11 @@ export default function DubbingPage() {
                             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                                 <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                                     <Languages className="h-4 w-4 text-indigo-600" />
-                                    Target language
+                                    Target language · Zonos2 TTS
                                 </span>
+                                <p className="mt-1 text-xs text-slate-500">
+                                    These are the languages currently supported for generated voice output.
+                                </p>
                                 <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="Target language">
                                     {targetLanguages.map((language) => (
                                         <button
