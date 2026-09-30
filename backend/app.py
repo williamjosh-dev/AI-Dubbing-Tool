@@ -1,11 +1,14 @@
 import os
 import re
+import json
 import shutil
 import subprocess
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +31,7 @@ VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "mkv", "webm"}
 AUDIO_OUTPUT_FORMATS = {"wav", "mp3"}
 FEEDBACK_CATEGORIES = {"bug", "feature", "general"}
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+DISCORD_FEEDBACK_WEBHOOK_URL = os.getenv("DISCORD_FEEDBACK_WEBHOOK_URL")
 
 LANGUAGE_ALIASES = {
     "english": "en",
@@ -180,6 +184,40 @@ class FeedbackRequest(BaseModel):
     page: Optional[str] = Field(default=None, max_length=200)
 
 
+def notify_discord(feedback: Feedback) -> None:
+    if not DISCORD_FEEDBACK_WEBHOOK_URL:
+        return
+
+    payload = {
+        "embeds": [
+            {
+                "title": "New beta feedback",
+                "color": 5793266,
+                "fields": [
+                    {"name": "Category", "value": feedback.category, "inline": True},
+                    {"name": "Rating", "value": f"{feedback.rating}/5", "inline": True},
+                    {"name": "Page", "value": feedback.page or "Unknown", "inline": True},
+                    {"name": "Message", "value": feedback.message[:4096], "inline": False},
+                    {"name": "Email", "value": feedback.email or "Not provided", "inline": False},
+                ],
+                "timestamp": feedback.created_at.isoformat() if feedback.created_at else None,
+            }
+        ]
+    }
+    request = Request(
+        DISCORD_FEEDBACK_WEBHOOK_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=10):
+            pass
+    except (URLError, TimeoutError) as exc:
+        print(f"Discord feedback notification failed: {exc}")
+
+
 @app.post("/api/feedback")
 def create_feedback(payload: FeedbackRequest, db: Session = Depends(get_db)) -> dict:
     category = payload.category.strip().lower()
@@ -203,6 +241,8 @@ def create_feedback(payload: FeedbackRequest, db: Session = Depends(get_db)) -> 
     )
     db.add(feedback)
     db.commit()
+    db.refresh(feedback)
+    notify_discord(feedback)
 
     return {"ok": True, "message": "Thanks for helping improve AI Dubbing Studio."}
 

@@ -114,7 +114,7 @@ The full response also includes a `translatedSegments` array with per-line timin
 }
 ```
 
-The `category` must be `bug`, `feature`, or `general`; `rating` must be between 1 and 5. The optional email is used only if follow-up is needed. Feedback is stored in the configured database for later review.
+The `category` must be `bug`, `feature`, or `general`; `rating` must be between 1 and 5. The optional email is used only if follow-up is needed. Feedback is stored in the configured database for later review. If `DISCORD_FEEDBACK_WEBHOOK_URL` is configured on the deployed API, each submission is also sent to Discord as a notification; Discord delivery failures do not reject an otherwise valid feedback submission.
 
 **`GET /outputs/<filename>`** serves any generated file directly, which is how the download links in the dashboard actually work.
 
