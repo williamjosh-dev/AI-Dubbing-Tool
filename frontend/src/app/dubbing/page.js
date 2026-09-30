@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
     ArrowRight,
@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+const ACTIVE_JOB_STORAGE_KEY = 'ai-dubbing-active-job';
 
 const supportedLanguages = [
     { label: 'English', value: 'en' },
@@ -110,6 +111,46 @@ function formatError(error) {
     return error.detail || error.message || JSON.stringify(error);
 }
 
+function startJobPolling(jobId, { onStatus, onComplete, onFailure }) {
+    let isCancelled = false;
+    let timeoutId;
+
+    const checkStatus = async () => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/status/${jobId}`);
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(formatError(data));
+            }
+
+            if (isCancelled) return;
+
+            if (data.status === 'completed') {
+                onComplete(data.result);
+                return;
+            }
+
+            if (data.status === 'failed') {
+                onFailure(new Error(data.error || 'Dubbing processing failed on the backend.'));
+                return;
+            }
+
+            onStatus(data.status);
+            timeoutId = window.setTimeout(checkStatus, 3000);
+        } catch (pollError) {
+            if (!isCancelled) onFailure(pollError);
+        }
+    };
+
+    checkStatus();
+
+    return () => {
+        isCancelled = true;
+        if (timeoutId) window.clearTimeout(timeoutId);
+    };
+}
+
 export default function DubbingPage() {
     const [selectedFile, setSelectedFile] = useState(null);
     const [selectedSource, setSelectedSource] = useState('en');
@@ -122,6 +163,43 @@ export default function DubbingPage() {
     const [jobStatus, setJobStatus] = useState(''); // Tracking background task status
     const [result, setResult] = useState(null);
     const [error, setError] = useState('');
+
+    useEffect(() => {
+        const savedJob = window.localStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
+        if (!savedJob) return undefined;
+
+        let parsedJob;
+        try {
+            parsedJob = JSON.parse(savedJob);
+        } catch {
+            window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+            return undefined;
+        }
+
+        if (!parsedJob?.jobId) {
+            window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+            return undefined;
+        }
+
+        setIsSubmitting(true);
+        setJobStatus('Restoring your dubbing job...');
+
+        return startJobPolling(parsedJob.jobId, {
+            onStatus: (status) => setJobStatus(`Status: ${status}...`),
+            onComplete: (jobResult) => {
+                setResult(jobResult);
+                setJobStatus('');
+                setIsSubmitting(false);
+                window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+            },
+            onFailure: (pollError) => {
+                setError(pollError instanceof Error ? pollError.message : 'Could not restore the dubbing job.');
+                setJobStatus('');
+                setIsSubmitting(false);
+                window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+            },
+        });
+    }, []);
 
     const projectSummary = useMemo(
         () => [
@@ -175,43 +253,28 @@ export default function DubbingPage() {
             }
 
             const jobId = data.jobId;
+            window.localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify({ jobId }));
             setJobStatus('Processing dubbing task...');
 
-            // 2. Poll the status endpoint until complete or failed
-            await new Promise((resolve, reject) => {
-                const pollInterval = setInterval(async () => {
-                    try {
-                        const statusRes = await fetch(`${API_BASE_URL}/api/status/${jobId}`);
-                        const jobData = await statusRes.json();
-
-                        if (!statusRes.ok) {
-                            clearInterval(pollInterval);
-                            reject(new Error(formatError(jobData)));
-                            return;
-                        }
-
-                        if (jobData.status === 'completed') {
-                            clearInterval(pollInterval);
-                            setResult(jobData.result);
-                            setJobStatus('');
-                            resolve();
-                        } else if (jobData.status === 'failed') {
-                            clearInterval(pollInterval);
-                            reject(new Error(jobData.error || 'Dubbing processing failed on backend.'));
-                        } else {
-                            setJobStatus(`Status: ${jobData.status}...`);
-                        }
-                    } catch (pollErr) {
-                        clearInterval(pollInterval);
-                        reject(pollErr);
-                    }
-                }, 3000); // Check every 3 seconds
+            startJobPolling(jobId, {
+                onStatus: (status) => setJobStatus(`Status: ${status}...`),
+                onComplete: (jobResult) => {
+                    setResult(jobResult);
+                    setJobStatus('');
+                    setIsSubmitting(false);
+                    window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+                },
+                onFailure: (pollError) => {
+                    setError(pollError instanceof Error ? pollError.message : 'Dubbing processing failed.');
+                    setJobStatus('');
+                    setIsSubmitting(false);
+                    window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+                },
             });
 
         } catch (submitError) {
             setError(submitError instanceof Error ? submitError.message : 'Failed to submit the job.');
             setJobStatus('');
-        } finally {
             setIsSubmitting(false);
         }
     };
