@@ -19,7 +19,13 @@ STORAGE_DIR = "/root/shared_storage"
 # ==========================================
 cpu_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("ffmpeg", "libavcodec-extra")
+    .apt_install(
+        "ffmpeg",
+        "libavcodec-extra",
+        "gstreamer1.0-tools",
+        "gstreamer1.0-plugins-base",
+        "gstreamer1.0-plugins-good",
+    )
     .pip_install(
         "fastapi[standard]",
         "groq",
@@ -271,7 +277,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     image=zonos2_image,
     gpu="L4",
     max_containers=1,
-    scaledown_window=15,
+    scaledown_window=100,
     volumes={"/root/models": MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
     timeout=600,
@@ -300,8 +306,6 @@ class generate_zonos_speech_worker:
         language: str
     ):
         """Executes instantly because model is already in VRAM."""
-        SHARED_VOLUME.reload()
-
         # 2. generate_speech will call _get_zonos_model() internally, 
         # which returns the pre-loaded global instance without delay!
         self.generate_speech(
@@ -311,7 +315,6 @@ class generate_zonos_speech_worker:
             language=language,
         )
 
-        SHARED_VOLUME.commit()
         
 # -------------------------------------------------------------
 # STEP 3: L4 GPU Worker Pipeline (Demucs + WhisperX + Translation)
@@ -320,7 +323,7 @@ class generate_zonos_speech_worker:
     image=l4_image,
     gpu="L4",
     max_containers=1,
-    scaledown_window=15,
+    scaledown_window=100,
     volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
     timeout=1800,
@@ -492,17 +495,47 @@ def assemble_and_finish_container(
         actual_dur_ms = len(seg_audio)
 
         stretched_file = os.path.join(job_dir, f"stretched_seg_{i}.wav")
-        if actual_dur_ms > target_dur_ms and target_dur_ms > 100:
-            speed_ratio = round(actual_dur_ms / target_dur_ms, 2)
-            speed_ratio = max(0.5, min(speed_ratio, 1.4))
-            
+        if actual_dur_ms > 0 and target_dur_ms > 100:
+            # GStreamer's scaletempo changes duration while preserving pitch.
+            # Keep the factor conservative so alignment does not make the voice unnatural.
+            tempo_factor = actual_dur_ms / target_dur_ms
+            tempo_factor = max(0.75, min(tempo_factor, 1.35))
+
             cmd = [
-                "ffmpeg", "-y", "-i", raw_seg_file,
-                "-filter:a", f"atempo={speed_ratio}",
-                stretched_file
+                "gst-launch-1.0", "-q",
+                "filesrc", f"location={raw_seg_file}", "!",
+                "wavparse", "!",
+                "audioconvert", "!",
+                "audioresample", "!",
+                "scaletempo", f"tempo={tempo_factor:.3f}", "!",
+                "wavenc", "!",
+                "filesink", f"location={stretched_file}",
             ]
             result = subprocess.run(cmd, capture_output=True, check=False, text=True)
-            processed_clip = AudioSegment.from_file(stretched_file) if result.returncode == 0 else seg_audio
+            if result.returncode == 0 and os.path.exists(stretched_file):
+                processed_clip = AudioSegment.from_file(stretched_file)
+            else:
+                # Keep FFmpeg atempo as a runtime fallback if GStreamer is unavailable.
+                fallback_cmd = [
+                    "ffmpeg", "-y", "-i", raw_seg_file,
+                    "-filter:a", f"atempo={tempo_factor:.3f}",
+                    "-c:a", "pcm_s16le",
+                    stretched_file,
+                ]
+                fallback_result = subprocess.run(
+                    fallback_cmd, capture_output=True, check=False, text=True
+                )
+                processed_clip = (
+                    AudioSegment.from_file(stretched_file)
+                    if fallback_result.returncode == 0 and os.path.exists(stretched_file)
+                    else seg_audio
+                )
+
+            # Keep every clip inside its WhisperX segment window after tempo processing.
+            if len(processed_clip) > target_dur_ms:
+                processed_clip = processed_clip[:target_dur_ms]
+            elif len(processed_clip) < target_dur_ms:
+                processed_clip += AudioSegment.silent(duration=target_dur_ms - len(processed_clip))
         else:
             processed_clip = seg_audio
 
