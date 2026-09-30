@@ -207,7 +207,10 @@ def notify_discord(feedback: Feedback) -> None:
     request = Request(
         DISCORD_FEEDBACK_WEBHOOK_URL,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
         method="POST",
     )
 
