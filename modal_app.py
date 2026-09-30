@@ -37,7 +37,7 @@ cpu_image = (
         "modal",
         "supabase",
         "sqlalchemy>=2.0",
-        "psycopg2-binary",
+        "psycopg[binary]",
         "deep-translator",
     )
     .add_local_dir(ROOT_DIR / "backend", remote_path="/root/backend")
