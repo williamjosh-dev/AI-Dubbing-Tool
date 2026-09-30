@@ -1,10 +1,12 @@
 import os
 import re
 import json
+import hashlib
 import shutil
 import subprocess
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from urllib.error import URLError
@@ -16,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from backend.db import Feedback, Job, SessionLocal, get_db, init_db
+from backend.db import BetaToken, Feedback, Job, SessionLocal, get_db, init_db
 from backend.pipeline import AudioTranslationPipeline
 from backend.storage import upload_public_file
 
@@ -32,6 +34,8 @@ AUDIO_OUTPUT_FORMATS = {"wav", "mp3"}
 FEEDBACK_CATEGORIES = {"bug", "feature", "general"}
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 DISCORD_FEEDBACK_WEBHOOK_URL = os.getenv("DISCORD_FEEDBACK_WEBHOOK_URL")
+BETA_ACCESS_REQUIRED = os.getenv("BETA_ACCESS_REQUIRED", "1").lower() in {"1", "true", "yes", "on"}
+BETA_MAX_JOB_SECONDS = float(os.getenv("BETA_MAX_JOB_SECONDS", "90"))
 
 LANGUAGE_ALIASES = {
     "english": "en",
@@ -176,6 +180,107 @@ def health_check() -> dict:
     return {"ok": True, "ffmpegAvailable": is_ffmpeg_available()}
 
 
+class BetaTokenRequest(BaseModel):
+    token: str = Field(..., min_length=8, max_length=128)
+
+
+def hash_beta_token(token: str) -> str:
+    return hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+
+
+def beta_token_response(token: BetaToken) -> dict:
+    remaining_seconds = max(
+        0.0,
+        token.allowed_seconds - token.used_seconds - token.reserved_seconds,
+    )
+    return {
+        "valid": True,
+        "remainingSeconds": round(remaining_seconds, 1),
+        "expiresAt": token.expires_at.isoformat(),
+        "hasActiveJob": bool(token.active_job_id),
+    }
+
+
+def find_beta_token(db: Session, raw_token: str, lock: bool = False) -> Optional[BetaToken]:
+    query = db.query(BetaToken).filter(BetaToken.token_hash == hash_beta_token(raw_token))
+    if lock:
+        query = query.with_for_update()
+    return query.first()
+
+
+def reserve_beta_token(db: Session, raw_token: str, job_id: str, duration_seconds: float) -> None:
+    token = find_beta_token(db, raw_token, lock=True)
+    if not token:
+        raise HTTPException(status_code=403, detail="This beta access token is invalid.")
+    if token.expires_at <= datetime.utcnow():
+        raise HTTPException(status_code=403, detail="This beta access token has expired.")
+    if token.active_job_id:
+        raise HTTPException(status_code=409, detail="This beta token already has a job in progress.")
+    if duration_seconds > BETA_MAX_JOB_SECONDS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Beta uploads are limited to {int(BETA_MAX_JOB_SECONDS)} seconds per job.",
+        )
+
+    remaining_seconds = token.allowed_seconds - token.used_seconds - token.reserved_seconds
+    if duration_seconds > remaining_seconds + 0.01:
+        raise HTTPException(
+            status_code=402,
+            detail=f"This beta token has {max(0, int(remaining_seconds))} seconds remaining.",
+        )
+
+    token.active_job_id = job_id
+    token.reserved_seconds = duration_seconds
+    token.redeemed_at = token.redeemed_at or datetime.utcnow()
+    db.commit()
+
+
+def settle_beta_token(db: Session, job_id: str, completed: bool) -> None:
+    token = db.query(BetaToken).filter(BetaToken.active_job_id == job_id).with_for_update().first()
+    if not token:
+        return
+    if completed:
+        token.used_seconds += token.reserved_seconds
+    token.reserved_seconds = 0
+    token.active_job_id = None
+    db.commit()
+
+
+@app.post("/api/beta/validate")
+def validate_beta_token(payload: BetaTokenRequest, db: Session = Depends(get_db)) -> dict:
+    token = find_beta_token(db, payload.token)
+    if not token:
+        raise HTTPException(status_code=403, detail="This beta access token is invalid.")
+    if token.expires_at <= datetime.utcnow():
+        raise HTTPException(status_code=403, detail="This beta access token has expired.")
+    return beta_token_response(token)
+
+
+def get_media_duration(source_path: Path) -> float:
+    ffprobe_path = shutil.which("ffprobe")
+    if not ffprobe_path:
+        raise HTTPException(status_code=503, detail="FFprobe is required to validate beta upload duration.")
+    try:
+        result = subprocess.run(
+            [
+                ffprobe_path,
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(source_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        duration_seconds = float(result.stdout.strip())
+    except (ValueError, FileNotFoundError, subprocess.CalledProcessError) as exc:
+        raise HTTPException(status_code=400, detail="Could not determine the uploaded media duration.") from exc
+    if duration_seconds <= 0:
+        raise HTTPException(status_code=400, detail="The uploaded media has no usable duration.")
+    return duration_seconds
+
+
 class FeedbackRequest(BaseModel):
     category: str = Field(..., max_length=32)
     rating: int = Field(..., ge=1, le=5)
@@ -308,6 +413,8 @@ def run_dubbing_pipeline(
             job.download_url = video_url or audio_url
             job.status = "completed"
             db.commit()
+            if BETA_ACCESS_REQUIRED:
+                settle_beta_token(db, job_id, completed=True)
         print(f"[{job_id}] Task completed successfully!")
 
     except Exception as exc:
@@ -316,6 +423,8 @@ def run_dubbing_pipeline(
             job.status = "failed"
             job.error = str(exc)
             db.commit()
+            if BETA_ACCESS_REQUIRED:
+                settle_beta_token(db, job_id, completed=False)
     finally:
         db.close()
 
@@ -330,6 +439,7 @@ def dub_audio(
     voiceMethod: Optional[str] = Form(None),
     outputFormat: str = Form("wav"),
     enhanceAudio: str = Form("off"),
+    betaToken: Optional[str] = Form(None),
 ) -> dict:
     if not audioFile.filename:
         raise HTTPException(status_code=400, detail="A file name is required.")
@@ -342,6 +452,8 @@ def dub_audio(
 
     if not has_allowed_extension(audioFile.filename):
         raise HTTPException(status_code=400, detail="Unsupported file type.")
+    if BETA_ACCESS_REQUIRED and not betaToken:
+        raise HTTPException(status_code=401, detail="A beta access token is required.")
 
     job_id = uuid.uuid4().hex[:12]
     original_ext = audioFile.filename.rsplit(".", 1)[1].lower()
@@ -372,10 +484,20 @@ def dub_audio(
     dubbed_video_path = OUTPUT_DIR / f"{job_id}_dubbed.mp4"
 
     db = SessionLocal()
+    job = None
     try:
         job = Job(job_id=job_id, status="queued")
         db.add(job)
         db.commit()
+        if BETA_ACCESS_REQUIRED:
+            duration_seconds = get_media_duration(source_path)
+            reserve_beta_token(db, betaToken, job_id, duration_seconds)
+    except Exception:
+        db.rollback()
+        if job and db.query(Job).filter(Job.job_id == job_id).first():
+            db.delete(job)
+            db.commit()
+        raise
     finally:
         db.close()
 
@@ -397,15 +519,23 @@ def dub_audio(
         clean_source_path = str(shared_source_path).replace("\x00", "").strip()
 
         # 4. Pass the string file path (NOT file_bytes) to Modal
-        run_modal_job.spawn(
-            job_id=clean_job_id,
-            source_path=clean_source_path,
-            is_video=is_video,
-            source_language=source_language,
-            target_language=target_language,
-            output_format=output_format,
-            enhance_audio=enhance_flag,
-        )
+        try:
+            run_modal_job.spawn(
+                job_id=clean_job_id,
+                source_path=clean_source_path,
+                is_video=is_video,
+                source_language=source_language,
+                target_language=target_language,
+                output_format=output_format,
+                enhance_audio=enhance_flag,
+            )
+        except Exception:
+            cleanup_db = SessionLocal()
+            try:
+                settle_beta_token(cleanup_db, job_id, completed=False)
+            finally:
+                cleanup_db.close()
+            raise
     else:
         background_tasks.add_task(
             run_dubbing_pipeline,

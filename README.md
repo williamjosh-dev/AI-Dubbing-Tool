@@ -116,6 +116,16 @@ The full response also includes a `translatedSegments` array with per-line timin
 
 The `category` must be `bug`, `feature`, or `general`; `rating` must be between 1 and 5. The optional email is used only if follow-up is needed. Feedback is stored in the configured database for later review. If `DISCORD_FEEDBACK_WEBHOOK_URL` is configured on the deployed API, each submission is also sent to Discord as a notification; Discord delivery failures do not reject an otherwise valid feedback submission.
 
+**Beta access tokens** — the beta upload flow requires a server-created token by default. Create one from the project root after configuring `DATABASE_URL`:
+
+```
+python3 -m backend.create_beta_token --minutes 3 --expires-days 7
+```
+
+The command prints the token to send to a waitlisted user. The default allowance is 3 total minutes per token and 90 seconds per upload. Configure `BETA_ACCESS_REQUIRED=0` to disable token enforcement or set `BETA_MAX_JOB_SECONDS` to change the per-upload limit. Tokens are validated and consumed by the backend; they are not trusted from frontend storage.
+
+**`POST /api/beta/validate`** — validates a beta token and returns its remaining seconds and expiration time. The dubbing form calls this endpoint before submitting an upload.
+
 **`GET /outputs/<filename>`** serves any generated file directly, which is how the download links in the dashboard actually work.
 
 ---

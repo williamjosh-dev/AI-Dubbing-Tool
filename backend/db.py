@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from sqlalchemy import create_engine, Column, String, DateTime, Integer, Text
+from sqlalchemy import create_engine, Column, String, DateTime, Integer, Text, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -34,6 +34,20 @@ class Feedback(Base):
     message = Column(Text, nullable=False)
     email = Column(String(320), nullable=True)
     page = Column(String(200), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class BetaToken(Base):
+    __tablename__ = "beta_tokens"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    allowed_seconds = Column(Float, nullable=False, default=180.0)
+    used_seconds = Column(Float, nullable=False, default=0.0)
+    reserved_seconds = Column(Float, nullable=False, default=0.0)
+    active_job_id = Column(String(12), nullable=True, unique=True)
+    expires_at = Column(DateTime, nullable=False)
+    redeemed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 

@@ -613,7 +613,7 @@ def run_modal_job(
 ) -> dict:
     if "/root" not in sys.path:
         sys.path.insert(0, "/root")
-    from backend.db import Job, SessionLocal
+    from backend.db import BetaToken, Job, SessionLocal
     from backend.storage import upload_public_file
 
     job_dir = Path(STORAGE_DIR) / job_id
@@ -661,6 +661,12 @@ def run_modal_job(
         job.transcript_url = upload_public_file(transcript_path, job_id, "transcript")
         job.status = "completed"
         db.commit()
+        settle_token = db.query(BetaToken).filter(BetaToken.active_job_id == job_id).with_for_update().first()
+        if settle_token:
+            settle_token.used_seconds += settle_token.reserved_seconds
+            settle_token.reserved_seconds = 0
+            settle_token.active_job_id = None
+            db.commit()
         return {
             "audioUrl": job.audio_url,
             "videoUrl": job.video_url,
@@ -671,6 +677,11 @@ def run_modal_job(
         job.status = "failed"
         job.error = str(exc)[:500]
         db.commit()
+        settle_token = db.query(BetaToken).filter(BetaToken.active_job_id == job_id).with_for_update().first()
+        if settle_token:
+            settle_token.reserved_seconds = 0
+            settle_token.active_job_id = None
+            db.commit()
         raise
     finally:
         db.close()

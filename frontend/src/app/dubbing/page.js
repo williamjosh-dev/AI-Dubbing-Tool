@@ -7,6 +7,7 @@ import {
     Clapperboard,
     FileAudio2,
     Globe2,
+    KeyRound,
     Languages,
     Music2,
     PlayCircle,
@@ -20,6 +21,7 @@ import {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 const ACTIVE_JOB_STORAGE_KEY = 'ai-dubbing-active-job';
+const BETA_TOKEN_STORAGE_KEY = 'ai-dubbing-beta-token';
 
 const supportedLanguages = [
     { label: 'English', value: 'en' },
@@ -151,6 +153,17 @@ function startJobPolling(jobId, { onStatus, onComplete, onFailure }) {
     };
 }
 
+async function validateBetaToken(token) {
+    const response = await fetch(`${API_BASE_URL}/api/beta/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(formatError(data));
+    return data;
+}
+
 export default function DubbingPage() {
     const [selectedFile, setSelectedFile] = useState(null);
     const [selectedSource, setSelectedSource] = useState('en');
@@ -163,6 +176,9 @@ export default function DubbingPage() {
     const [jobStatus, setJobStatus] = useState(''); // Tracking background task status
     const [result, setResult] = useState(null);
     const [error, setError] = useState('');
+    const [betaToken, setBetaToken] = useState('');
+    const [betaAccess, setBetaAccess] = useState(null);
+    const [isValidatingToken, setIsValidatingToken] = useState(false);
 
     useEffect(() => {
         const savedJob = window.localStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
@@ -201,6 +217,19 @@ export default function DubbingPage() {
         });
     }, []);
 
+    useEffect(() => {
+        const savedToken = window.localStorage.getItem(BETA_TOKEN_STORAGE_KEY);
+        if (!savedToken) return;
+
+        setBetaToken(savedToken);
+        validateBetaToken(savedToken)
+            .then(setBetaAccess)
+            .catch(() => {
+                window.localStorage.removeItem(BETA_TOKEN_STORAGE_KEY);
+                setBetaToken('');
+            });
+    }, []);
+
     const projectSummary = useMemo(
         () => [
             { label: 'Source language', value: sourceLanguages.find((item) => item.value === selectedSource)?.label || selectedSource },
@@ -219,9 +248,35 @@ export default function DubbingPage() {
         setJobStatus('');
     };
 
+    const handleValidateToken = async () => {
+        const normalizedToken = betaToken.trim();
+        if (!normalizedToken) {
+            setError('Enter the beta access token you received.');
+            return;
+        }
+
+        setIsValidatingToken(true);
+        setError('');
+        try {
+            const access = await validateBetaToken(normalizedToken);
+            setBetaToken(normalizedToken);
+            setBetaAccess(access);
+            window.localStorage.setItem(BETA_TOKEN_STORAGE_KEY, normalizedToken);
+        } catch (tokenError) {
+            setBetaAccess(null);
+            setError(tokenError instanceof Error ? tokenError.message : 'Could not validate the beta token.');
+        } finally {
+            setIsValidatingToken(false);
+        }
+    };
+
     const handleSubmit = async () => {
         if (!selectedFile) {
             setError('Choose an audio or video file before starting the dub.');
+            return;
+        }
+        if (!betaAccess?.valid) {
+            setError('Validate your beta access token before starting the dub.');
             return;
         }
 
@@ -239,6 +294,7 @@ export default function DubbingPage() {
             formData.append('voiceMethod', selectedVoiceMethod);
             formData.append('outputFormat', selectedFormat);
             formData.append('enhanceAudio', enhanceAudio ? 'on' : 'off');
+            formData.append('betaToken', betaToken);
 
             // 1. Send file to initiate background processing
             const response = await fetch(`${API_BASE_URL}/api/dub`, {
@@ -263,6 +319,7 @@ export default function DubbingPage() {
                     setJobStatus('');
                     setIsSubmitting(false);
                     window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+                    validateBetaToken(betaToken).then(setBetaAccess).catch(() => {});
                 },
                 onFailure: (pollError) => {
                     setError(pollError instanceof Error ? pollError.message : 'Dubbing processing failed.');
@@ -297,6 +354,46 @@ export default function DubbingPage() {
                 aria-label="Upload audio or video file"
                 onChange={handleFileChange}
             />
+
+            <section className="panel mb-6">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                    <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                            <KeyRound className="h-5 w-5 text-indigo-600" />
+                            <label htmlFor="beta-token" className="text-sm font-semibold text-slate-900">
+                                Beta access token
+                            </label>
+                        </div>
+                        <p className="mt-1 text-sm text-slate-500">
+                            Enter the token from your waitlist invite. It grants a limited amount of processing time.
+                        </p>
+                        <input
+                            id="beta-token"
+                            value={betaToken}
+                            onChange={(event) => {
+                                setBetaToken(event.target.value);
+                                setBetaAccess(null);
+                            }}
+                            placeholder="Paste your beta token"
+                            autoComplete="off"
+                            className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-700 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                        />
+                    </div>
+                    <button
+                        type="button"
+                        onClick={handleValidateToken}
+                        disabled={isValidatingToken}
+                        className="btn-secondary shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        {isValidatingToken ? 'Checking...' : 'Validate token'}
+                    </button>
+                </div>
+                {betaAccess?.valid && (
+                    <p className="mt-3 text-sm font-medium text-emerald-700">
+                        Access confirmed · {Math.ceil(betaAccess.remainingSeconds)} seconds remaining
+                    </p>
+                )}
+            </section>
 
             <header className="hero-shell text-white">
                 <div className="absolute inset-0 opacity-30 [background-image:radial-gradient(circle_at_top_right,rgba(99,102,241,0.55),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(56,189,248,0.2),transparent_28%)]" />
