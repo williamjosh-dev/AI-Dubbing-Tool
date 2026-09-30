@@ -102,6 +102,20 @@ A trimmed example of what comes back:
 
 The full response also includes a `translatedSegments` array with per-line timing and text, which is what the transcript viewer in the UI reads from. That same array is exactly what you'd need if you ever want to export subtitles later — the timing data is already there.
 
+**`POST /api/feedback`** — accepts a JSON body for beta feedback:
+
+```
+{
+  "category": "bug",
+  "rating": 4,
+  "message": "The upload flow was clear, but processing took longer than expected.",
+  "email": "optional@example.com",
+  "page": "/dubbing"
+}
+```
+
+The `category` must be `bug`, `feature`, or `general`; `rating` must be between 1 and 5. The optional email is used only if follow-up is needed. Feedback is stored in the configured database for later review.
+
 **`GET /outputs/<filename>`** serves any generated file directly, which is how the download links in the dashboard actually work.
 
 ---

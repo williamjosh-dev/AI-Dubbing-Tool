@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import uuid
@@ -9,9 +10,10 @@ from typing import Optional
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from backend.db import Job, SessionLocal, get_db, init_db
+from backend.db import Feedback, Job, SessionLocal, get_db, init_db
 from backend.pipeline import AudioTranslationPipeline
 from backend.storage import upload_public_file
 
@@ -24,6 +26,8 @@ FFMPEG_PATH = os.getenv("FFMPEG_PATH", "ffmpeg")
 ALLOWED_EXTENSIONS = {"mp3", "wav", "ogg", "flac", "m4a", "mp4", "mov", "avi", "mkv", "webm"}
 VIDEO_EXTENSIONS = {"mp4", "mov", "avi", "mkv", "webm"}
 AUDIO_OUTPUT_FORMATS = {"wav", "mp3"}
+FEEDBACK_CATEGORIES = {"bug", "feature", "general"}
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 LANGUAGE_ALIASES = {
     "english": "en",
@@ -166,6 +170,41 @@ def replace_audio_in_video(video_path: Path, audio_path: Path, output_path: Path
 @app.get("/api/health")
 def health_check() -> dict:
     return {"ok": True, "ffmpegAvailable": is_ffmpeg_available()}
+
+
+class FeedbackRequest(BaseModel):
+    category: str = Field(..., max_length=32)
+    rating: int = Field(..., ge=1, le=5)
+    message: str = Field(..., min_length=1, max_length=2000)
+    email: Optional[str] = Field(default=None, max_length=320)
+    page: Optional[str] = Field(default=None, max_length=200)
+
+
+@app.post("/api/feedback")
+def create_feedback(payload: FeedbackRequest, db: Session = Depends(get_db)) -> dict:
+    category = payload.category.strip().lower()
+    message = payload.message.strip()
+    email = payload.email.strip() if payload.email else None
+    page = payload.page.strip() if payload.page else None
+
+    if category not in FEEDBACK_CATEGORIES:
+        raise HTTPException(status_code=400, detail="Choose a valid feedback category.")
+    if not message:
+        raise HTTPException(status_code=400, detail="Feedback message cannot be empty.")
+    if email and not EMAIL_PATTERN.fullmatch(email):
+        raise HTTPException(status_code=400, detail="Enter a valid email address or leave it blank.")
+
+    feedback = Feedback(
+        category=category,
+        rating=payload.rating,
+        message=message,
+        email=email,
+        page=page,
+    )
+    db.add(feedback)
+    db.commit()
+
+    return {"ok": True, "message": "Thanks for helping improve AI Dubbing Studio."}
 
 
 def run_dubbing_pipeline(
