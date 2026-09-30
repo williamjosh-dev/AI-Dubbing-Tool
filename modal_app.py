@@ -303,11 +303,22 @@ class generate_zonos_speech_worker:
         text: str,
         output_path: str,
         reference_audio: str,
-        language: str
+        language: str,
     ):
-        """Executes instantly because model is already in VRAM."""
-        # 2. generate_speech will call _get_zonos_model() internally, 
-        # which returns the pre-loaded global instance without delay!
+        import os
+
+        # Refresh the long-lived worker's view of the shared volume
+        SHARED_VOLUME.reload()
+
+        print(f"[ZONOS] Reference: {reference_audio}")
+        print(f"[ZONOS] Exists: {os.path.exists(reference_audio)}")
+
+        if not os.path.exists(reference_audio):
+            raise FileNotFoundError(
+                f"Reference audio not found in Zonos worker: {reference_audio}"
+            )
+
+        # Generate ONCE
         self.generate_speech(
             text=text,
             output_path=output_path,
@@ -315,7 +326,11 @@ class generate_zonos_speech_worker:
             language=language,
         )
 
-        
+        print(f"[ZONOS] Generated: {output_path}")
+        print(f"[ZONOS] Output exists: {os.path.exists(output_path)}")
+
+        # Publish the generated WAV
+        SHARED_VOLUME.commit()
 # -------------------------------------------------------------
 # STEP 3: L4 GPU Worker Pipeline (Demucs + WhisperX + Translation)
 # -------------------------------------------------------------
