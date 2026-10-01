@@ -237,6 +237,35 @@ zonos2_image = (
 
 app = modal.App("ai-dubbing-full-pipeline")
 
+@app.function(image=cpu_image, secrets=[modal.Secret.from_name("my-repo-secrets")])
+def create_beta_token(minutes: int = 3, expires_days: int = 7) -> str:
+    import hashlib
+    import secrets
+    from datetime import datetime, timedelta
+
+    from backend.db import BetaToken, SessionLocal, init_db
+
+    if minutes <= 0 or expires_days <= 0:
+        raise ValueError("minutes and expires_days must be positive")
+
+    init_db()
+    token = secrets.token_urlsafe(12)
+    db = SessionLocal()
+    try:
+        db.add(
+            BetaToken(
+                token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+                allowed_seconds=minutes * 60,
+                expires_at=datetime.utcnow() + timedelta(days=expires_days),
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    print(token)
+    return token
+
 # -------------------------------------------------------------
 # STEP 1: CPU Worker - Audio Extraction
 # -------------------------------------------------------------
