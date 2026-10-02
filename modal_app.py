@@ -307,6 +307,8 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     gpu="L4",
     max_containers=1,
     scaledown_window=100,
+    enable_memory_snapshot=True,
+    experimental_options={"enable_gpu_snapshot": True},
     volumes={"/root/models": MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
     timeout=600,
@@ -336,9 +338,6 @@ class generate_zonos_speech_worker:
     ):
         import os
 
-        # Refresh the long-lived worker's view of the shared volume
-        SHARED_VOLUME.reload()
-
         print(f"[ZONOS] Reference: {reference_audio}")
         print(f"[ZONOS] Exists: {os.path.exists(reference_audio)}")
 
@@ -358,8 +357,6 @@ class generate_zonos_speech_worker:
         print(f"[ZONOS] Generated: {output_path}")
         print(f"[ZONOS] Output exists: {os.path.exists(output_path)}")
 
-        # Publish the generated WAV
-        SHARED_VOLUME.commit()
 # -------------------------------------------------------------
 # STEP 3: L4 GPU Worker Pipeline (Demucs + WhisperX + Translation)
 # -------------------------------------------------------------
