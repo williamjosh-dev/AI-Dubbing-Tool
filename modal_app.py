@@ -378,10 +378,10 @@ def process_gpu_pipeline(
     src_lang: str,
     tgt_lang: str,
     separate_stems: bool = True,
-) -> list[dict]:
+) -> dict:
     if "/root" not in sys.path:
         sys.path.insert(0, "/root")
-
+    
     SHARED_VOLUME.reload()
     import torch
     from pydub import AudioSegment
@@ -461,39 +461,10 @@ def process_gpu_pipeline(
 
     SHARED_VOLUME.commit()
 
-    # 1. Collect all valid segments into parallel lists
-    texts = []
-    output_paths = []
-    reference_audios = []
-    languages = []
-
-    for index, segment in enumerate(translated_segments):
-        translated_text = segment.get("translated", "").strip()
-        if not translated_text:
-            continue
-        
-        texts.append(translated_text)
-        output_paths.append(str(job_dir / f"raw_seg_{index}.wav"))
-        reference_audios.append(str(reference_path))
-        languages.append(tgt_lang)
-
-    # 2. Fire them into the Modal parallel queue all at once
-    if texts:
-        print(f"[{job_id}] Sending {len(texts)} segments concurrently to Zonos workers...")
-        
-        # Modal maps the lists across your worker containers dynamically
-        list(generate_zonos_speech_worker().generate.map(
-            texts, 
-            output_paths, 
-            reference_audios, 
-            languages
-        ))
-        
-        print(f"[{job_id}] All Zonos generations completed successfully!")
-
-    SHARED_VOLUME.commit()
-
-    return translated_segments
+    return {
+    "translated_segments": translated_segments,
+    "reference_audio": str(reference_path),
+    }
 
 # -------------------------------------------------------------
 # STEP 3: Time-Stretch & Assembly
@@ -662,7 +633,7 @@ def run_modal_job(
 
         working_audio_path = extract_audio_container.remote(job_id, source_path)
         
-        translated_segments = process_gpu_pipeline.remote(
+        gpu_results = process_gpu_pipeline.remote(
             working_audio_path,
             job_id,
             source_language,
@@ -670,6 +641,44 @@ def run_modal_job(
             separate_stems=enhance_audio,
         )
 
+        translated_segments = gpu_results["translated_segments"]
+        reference_audio = gpu_results["reference_audio"]
+
+        texts = []
+        output_paths = []
+        reference_audios = []
+        languages = []
+
+        for index, segment in enumerate(translated_segments):
+            translated_text = segment.get("translated", "").strip()
+
+            if not translated_text:
+                continue
+
+            texts.append(translated_text)
+            output_paths.append(
+                str(job_dir / f"raw_seg_{index}.wav")
+            )
+            reference_audios.append(reference_audio)
+            languages.append(target_language)
+
+        if texts:
+            print(
+                f"[{job_id}] Sending "
+                f"{len(texts)} segments to Zonos workers..."
+            )
+
+            list(
+                generate_zonos_speech_worker().generate.map(
+                    texts,
+                    output_paths,
+                    reference_audios,
+                    languages,
+                )
+            )
+
+            print(f"[{job_id}] All Zonos generations completed successfully!")
+                
         transcript_path = job_dir / f"{job_id}_transcript.txt"
         transcript_path.write_text(
             "\n".join(
