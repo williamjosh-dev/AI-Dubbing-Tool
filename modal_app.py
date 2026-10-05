@@ -503,45 +503,32 @@ def assemble_and_finish_container(
             continue
 
         target_dur_ms = int((seg["end"] - seg["start"]) * 1000)
+        if target_dur_ms <= 0:
+            continue
+
         seg_audio = AudioSegment.from_file(raw_seg_file)
         actual_dur_ms = len(seg_audio)
 
         stretched_file = os.path.join(job_dir, f"stretched_seg_{i}.wav")
-        if actual_dur_ms > 0 and target_dur_ms > 100:
-            # GStreamer's scaletempo changes duration while preserving pitch.
+        if actual_dur_ms > 0:
             # Keep the factor conservative so alignment does not make the voice unnatural.
             tempo_factor = actual_dur_ms / target_dur_ms
             tempo_factor = max(0.75, min(tempo_factor, 1.35))
 
-            cmd = [
-                "gst-launch-1.0", "-q",
-                "filesrc", f"location={raw_seg_file}", "!",
-                "wavparse", "!",
-                "audioconvert", "!",
-                "audioresample", "!",
-                "scaletempo", f"tempo={tempo_factor:.3f}", "!",
-                "wavenc", "!",
-                "filesink", f"location={stretched_file}",
+            atempo_cmd = [
+                "ffmpeg", "-y", "-i", raw_seg_file,
+                "-filter:a", f"atempo={tempo_factor:.3f}",
+                "-c:a", "pcm_s16le",
+                stretched_file,
             ]
-            result = subprocess.run(cmd, capture_output=True, check=False, text=True)
-            if result.returncode == 0 and os.path.exists(stretched_file):
-                processed_clip = AudioSegment.from_file(stretched_file)
-            else:
-                # Keep FFmpeg atempo as a runtime fallback if GStreamer is unavailable.
-                fallback_cmd = [
-                    "ffmpeg", "-y", "-i", raw_seg_file,
-                    "-filter:a", f"atempo={tempo_factor:.3f}",
-                    "-c:a", "pcm_s16le",
-                    stretched_file,
-                ]
-                fallback_result = subprocess.run(
-                    fallback_cmd, capture_output=True, check=False, text=True
+            atempo_result = subprocess.run(
+                atempo_cmd, capture_output=True, check=False, text=True
+            )
+            if atempo_result.returncode != 0 or not os.path.exists(stretched_file):
+                raise RuntimeError(
+                    f"FFmpeg atempo failed for segment {i}: {atempo_result.stderr}"
                 )
-                processed_clip = (
-                    AudioSegment.from_file(stretched_file)
-                    if fallback_result.returncode == 0 and os.path.exists(stretched_file)
-                    else seg_audio
-                )
+            processed_clip = AudioSegment.from_file(stretched_file)
 
             # Keep every clip inside its WhisperX segment window after tempo processing.
             if len(processed_clip) > target_dur_ms:

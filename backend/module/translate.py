@@ -26,7 +26,7 @@ STRICT RULES:
 7. Do not change an analogy or comparison into a different statement.
 8. Preserve names, people, places, brands, games, products, and technical terms. Use their established target-language form only when one exists.
 9. Preserve the speaker's perspective, tense, and intent.
-10. Keep each translation reasonably close to the length of the original segment.
+10. Match the available spoken duration for each segment. Prefer wording that can be spoken naturally within the supplied duration, aiming for the same duration as the source.
 11. Keep very short segments short. Do not add filler words.
 12. Do not unnecessarily expand sentences just to make them sound more natural.
 13. Do not combine, split, reorder, or omit dialogue segments.
@@ -59,11 +59,18 @@ def _translate_batch_with_retry(client, batch, src_lang, tgt_lang, max_retries=5
 
     # Build prompt payload using index relative to the current batch
     segments_payload = "\n\n".join(
-        f"<SEGMENT_{i:04d}>{item.get('text', '').strip()}</SEGMENT_{i:04d}>"
+        f"<SEGMENT_{i:04d} duration_seconds=\"{max(0.0, float(item.get('end', 0.0)) - float(item.get('start', 0.0))):.3f}\">"
+        f"{item.get('text', '').strip()}</SEGMENT_{i:04d}>"
         for i, item in enumerate(batch)
     )
     
-    user_prompt = f"Source Language: {src_lang}\nTarget Language: {tgt_lang}\n\n{segments_payload}"
+    user_prompt = (
+        f"Source Language: {src_lang}\n"
+        f"Target Language: {tgt_lang}\n"
+        "The duration_seconds value is the exact available window for the spoken target audio. "
+        "Keep each segment independent and choose concise, natural wording that fits that window.\n\n"
+        f"{segments_payload}"
+    )
 
     delay = 2.0  # Initial wait time in seconds
 
@@ -84,7 +91,7 @@ def _translate_batch_with_retry(client, batch, src_lang, tgt_lang, max_retries=5
 
             for i in range(len(batch)):
                 match = re.search(
-                    rf"<SEGMENT_{i:04d}>\s*(.*?)\s*</SEGMENT_{i:04d}>",
+                    rf"<SEGMENT_{i:04d}(?:\s[^>]*)?>\s*(.*?)\s*</SEGMENT_{i:04d}>",
                     output,
                     re.DOTALL,
                 )

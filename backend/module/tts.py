@@ -119,6 +119,7 @@ def generate_speech(
             ),
             language=norm_lang,
             speaker_embedding=speaker_embedding,
+            text_normalization=False,  # Disable Zonos2 text normalization to preserve original text
         )
         model.save_audio(result["audio"], str(output))
     except Exception as e:
