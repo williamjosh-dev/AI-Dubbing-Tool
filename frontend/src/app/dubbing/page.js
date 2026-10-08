@@ -286,20 +286,41 @@ export default function DubbingPage() {
         setJobStatus('Queuing job...');
 
         try {
-            const formData = new FormData();
-            formData.append('audioFile', selectedFile);
-            formData.append('srcLang', selectedSource);
-            formData.append('tgtLang', selectedTarget);
-            formData.append('voiceClone', voiceClone ? 'on' : 'off');
-            formData.append('voiceMethod', selectedVoiceMethod);
-            formData.append('outputFormat', selectedFormat);
-            formData.append('enhanceAudio', enhanceAudio ? 'on' : 'off');
-            formData.append('betaToken', betaToken);
-
-            // 1. Send file to initiate background processing
-            const response = await fetch(`${API_BASE_URL}/api/dub`, {
+            const tokenResponse = await fetch('/api/upload-token', {
                 method: 'POST',
-                body: formData,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    filename: selectedFile.name,
+                    contentType: selectedFile.type || 'application/octet-stream',
+                    size: selectedFile.size,
+                }),
+            });
+            const tokenData = await tokenResponse.json();
+            if (!tokenResponse.ok) throw new Error(formatError(tokenData));
+
+            setJobStatus('Uploading file directly to storage...');
+            const uploadResponse = await fetch(tokenData.uploadUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': selectedFile.type || 'application/octet-stream' },
+                body: selectedFile,
+            });
+            if (!uploadResponse.ok) throw new Error('The file upload to storage failed.');
+
+            setJobStatus('Queuing job...');
+            const response = await fetch(`${API_BASE_URL}/api/dub-from-storage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    objectKey: tokenData.objectKey,
+                    filename: selectedFile.name,
+                    srcLang: selectedSource,
+                    tgtLang: selectedTarget,
+                    voiceClone: voiceClone ? 'on' : 'off',
+                    voiceMethod: selectedVoiceMethod,
+                    outputFormat: selectedFormat,
+                    enhanceAudio: enhanceAudio ? 'on' : 'off',
+                    betaToken,
+                }),
             });
 
             const data = await response.json();

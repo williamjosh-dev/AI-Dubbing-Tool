@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from backend.db import BetaToken, Feedback, Job, SessionLocal, get_db, init_db
 from backend.pipeline import AudioTranslationPipeline
-from backend.storage import upload_public_file
+from backend.storage import download_r2_file, upload_public_file, upload_r2_file
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
@@ -289,6 +289,18 @@ class FeedbackRequest(BaseModel):
     page: Optional[str] = Field(default=None, max_length=200)
 
 
+class DubJobRequest(BaseModel):
+    objectKey: str = Field(..., min_length=9, max_length=512)
+    filename: str = Field(..., min_length=1, max_length=255)
+    srcLang: str = "en"
+    tgtLang: str = "es"
+    voiceClone: str = "off"
+    voiceMethod: Optional[str] = None
+    outputFormat: str = "wav"
+    enhanceAudio: str = "off"
+    betaToken: Optional[str] = None
+
+
 def notify_discord(feedback: Feedback) -> None:
     if not DISCORD_FEEDBACK_WEBHOOK_URL:
         return
@@ -402,10 +414,11 @@ def run_dubbing_pipeline(
             replace_audio_in_video(source_path, dubbed_audio_path, dubbed_video_path)
 
         if job:
-            audio_url = upload_public_file(dubbed_audio_path, job_id, "audio")
-            transcript_url = upload_public_file(transcript_path, job_id, "transcript")
+            output_uploader = upload_r2_file if os.getenv("R2_BUCKET_NAME") else upload_public_file
+            audio_url = output_uploader(dubbed_audio_path, job_id, "audio")
+            transcript_url = output_uploader(transcript_path, job_id, "transcript")
             video_url = (
-                upload_public_file(dubbed_video_path, job_id, "video") if is_video else None
+                output_uploader(dubbed_video_path, job_id, "video") if is_video else None
             )
             job.audio_url = audio_url
             job.video_url = video_url
@@ -552,6 +565,94 @@ def dub_audio(
             output_format,
             enhance_flag,
             warnings,
+        )
+
+    return {"jobId": job_id, "status": "queued"}
+
+
+@app.post("/api/dub-from-storage")
+def dub_from_storage(
+    payload: DubJobRequest,
+    background_tasks: BackgroundTasks,
+) -> dict:
+    """Create a job after the browser has uploaded the source directly to R2."""
+    if not is_ffmpeg_available():
+        raise HTTPException(status_code=503, detail="FFmpeg is required for uploads.")
+    if not has_allowed_extension(payload.filename):
+        raise HTTPException(status_code=400, detail="Unsupported file type.")
+    if BETA_ACCESS_REQUIRED and not payload.betaToken:
+        raise HTTPException(status_code=401, detail="A beta access token is required.")
+
+    job_id = uuid.uuid4().hex[:12]
+    original_ext = payload.filename.rsplit(".", 1)[1].lower()
+    safe_stem = Path(payload.filename).stem.replace(" ", "_")
+    source_path = UPLOAD_DIR / f"{job_id}_{safe_stem}.{original_ext}"
+
+    try:
+        download_r2_file(payload.objectKey, source_path)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Could not retrieve the uploaded file.") from exc
+
+    is_video = is_video_file(payload.filename)
+    source_language = normalize_language(payload.srcLang, "en")
+    target_language = normalize_language(payload.tgtLang, "es")
+    output_format = normalize_output_format(payload.outputFormat)
+    enhance_flag = parse_flag(payload.enhanceAudio)
+    voice_method = payload.voiceMethod if payload.voiceMethod and payload.voiceMethod != "off" else "zonos2"
+    warnings = []
+    working_audio_path = OUTPUT_DIR / f"{job_id}_input.wav"
+    dubbed_audio_path = OUTPUT_DIR / f"{job_id}_dubbed.{output_format}"
+    transcript_path = OUTPUT_DIR / f"{job_id}_transcript.txt"
+    dubbed_video_path = OUTPUT_DIR / f"{job_id}_dubbed.mp4"
+
+    db = SessionLocal()
+    job = None
+    try:
+        job = Job(job_id=job_id, status="queued")
+        db.add(job)
+        db.commit()
+        if BETA_ACCESS_REQUIRED:
+            reserve_beta_token(db, payload.betaToken, job_id, get_media_duration(source_path))
+    except Exception:
+        db.rollback()
+        if job and db.query(Job).filter(Job.job_id == job_id).first():
+            db.delete(job)
+            db.commit()
+        raise
+    finally:
+        db.close()
+
+    modal_pipeline = os.getenv("MODAL_PIPELINE") == "1"
+    if modal_pipeline:
+        from modal_app import run_modal_job
+
+        job_shared_dir = os.path.join("/root/shared_storage", job_id)
+        os.makedirs(job_shared_dir, exist_ok=True)
+        shared_source_path = os.path.join(job_shared_dir, f"input.{original_ext}")
+        shutil.copyfile(source_path, shared_source_path)
+        try:
+            run_modal_job.spawn(
+                job_id=job_id,
+                source_path=shared_source_path,
+                is_video=is_video,
+                source_language=source_language,
+                target_language=target_language,
+                output_format=output_format,
+                enhance_audio=enhance_flag,
+            )
+        except Exception:
+            cleanup_db = SessionLocal()
+            try:
+                settle_beta_token(cleanup_db, job_id, completed=False)
+            finally:
+                cleanup_db.close()
+            raise
+    else:
+        background_tasks.add_task(
+            run_dubbing_pipeline,
+            job_id, source_path, working_audio_path, dubbed_audio_path,
+            transcript_path, dubbed_video_path, is_video, source_language,
+            target_language, voice_method, output_format, enhance_flag, warnings,
         )
 
     return {"jobId": job_id, "status": "queued"}

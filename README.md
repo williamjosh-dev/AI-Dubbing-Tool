@@ -47,9 +47,9 @@ Nothing here needs a video editing background. If you can drag a file into a bro
 
 ## How it's built
 
-At a high level, this is a normal web app: a browser front end talking to a Flask backend, which in turn hands work off to a processing pipeline.
+At a high level, this is a normal web app: a browser front end talking to a FastAPI backend, which in turn hands work off to a processing pipeline.
 
-The browser sends the uploaded file to the Isolated Fastapi server. The server checks the file, pulls the audio out if its a video, and passes it to the pipeline. The pipeline handles transcription, translation, and voice generation, then hands a finished result back to the server, which serves it to the browser for playback and download.
+The browser first asks the Next.js serverless route for a short-lived Cloudflare R2 upload URL. The file then uploads directly from the browser to R2, bypassing Vercel request-body limits. The browser sends only the R2 object key and dubbing settings to FastAPI. FastAPI downloads the source into its worker storage before starting the pipeline.
 
 **The core stack:**
 
@@ -57,7 +57,7 @@ The browser sends the uploaded file to the Isolated Fastapi server. The server c
 - **Groq** for translation — fast, segment-by-segment translation so pacing stays close to the original instead of getting flattened into one paragraph.
 - **Zonos-2** for voice cloning — takes a short reference of the original speaker and generates the translated line back in their own voice, rather than a generic TTS voice.
 - **FFmpeg** for everything audio/video — extraction, cleanup, and reassembly.
-- **Flask** for the backend, serving a lightweight browser front end.
+- **FastAPI** for the backend, serving the processing API.
 
 Keeping these stages separated means a change to any one model or provider doesn't risk breaking the upload flow or the video handling. Each part does one job.
 
@@ -80,6 +80,21 @@ Keeping these stages separated means a change to any one model or provider doesn
 **7. Reassembly, if it was a video.** The new audio gets placed back onto the original video stream. The picture is never touched — only the sound changes.
 
 **8. Delivery.** Links to the finished audio, transcript, and (if applicable) video show up in the dashboard, ready to download.
+
+### R2/Vercel configuration
+
+Configure these secrets in both the Vercel frontend project and the FastAPI/Modal environment:
+
+```
+R2_ACCOUNT_ID=...
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET_NAME=dubbing-files
+```
+
+The R2 API token needs object read/write access to this bucket. Add an R2 CORS policy that permits `PUT` from the deployed frontend origin (and `http://localhost:3000` for local development), allows `Content-Type` and `Content-Length`, and exposes `ETag`. The presigned URL is valid for 15 minutes and the backend only accepts keys under `uploads/`.
+
+The JSON endpoint used by the new flow is **`POST /api/dub-from-storage`**. The original multipart **`POST /api/dub`** remains available for non-browser clients.
 
 ---
 
