@@ -34,6 +34,7 @@ cpu_image = (
         "pydub",
         "python-dotenv>=1.0",
         "requests",
+        "boto3>=1.34.0,<2.0",
         "modal",
         "supabase",
         "sqlalchemy>=2.0",
@@ -483,7 +484,7 @@ def assemble_and_finish_container(
     from pydub import AudioSegment
     if "/root" not in sys.path:
         sys.path.insert(0, "/root")
-    from backend.storage import upload_public_file
+    from backend.storage import upload_public_file, upload_r2_file
 
     SHARED_VOLUME.reload()
     job_dir = os.path.join(STORAGE_DIR, job_id)
@@ -558,8 +559,9 @@ def assemble_and_finish_container(
         if result.returncode != 0:
             raise RuntimeError(f"FFmpeg merge failed: {result.stderr}")
 
-    audio_url = upload_public_file(Path(final_audio_path), job_id, "audio")
-    video_url = upload_public_file(Path(final_video_path), job_id, "video") if is_video else None
+    output_uploader = upload_r2_file if os.getenv("R2_BUCKET_NAME") else upload_public_file
+    audio_url = output_uploader(Path(final_audio_path), job_id, "audio")
+    video_url = output_uploader(Path(final_video_path), job_id, "video") if is_video else None
     public_url = video_url or audio_url
 
     if webhook_url:
@@ -598,7 +600,7 @@ def run_modal_job(
     if "/root" not in sys.path:
         sys.path.insert(0, "/root")
     from backend.db import BetaToken, Job, SessionLocal
-    from backend.storage import upload_public_file
+    from backend.storage import upload_public_file, upload_r2_file
 
     job_dir = Path(STORAGE_DIR) / job_id
     SHARED_VOLUME.reload()
@@ -680,7 +682,8 @@ def run_modal_job(
         job.audio_url = result["audio_url"]
         job.video_url = result["video_url"]
         job.download_url = result["download_url"]
-        job.transcript_url = upload_public_file(transcript_path, job_id, "transcript")
+        output_uploader = upload_r2_file if os.getenv("R2_BUCKET_NAME") else upload_public_file
+        job.transcript_url = output_uploader(transcript_path, job_id, "transcript")
         job.status = "completed"
         db.commit()
         settle_token = db.query(BetaToken).filter(BetaToken.active_job_id == job_id).with_for_update().first()

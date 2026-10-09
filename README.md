@@ -94,7 +94,7 @@ R2_BUCKET_NAME=dubbing-files
 
 The R2 API token needs object read/write access to this bucket. Add an R2 CORS policy that permits `PUT` from the deployed frontend origin (and `http://localhost:3000` for local development), allows `Content-Type` and `Content-Length`, and exposes `ETag`. The presigned URL is valid for 15 minutes and the backend only accepts keys under `uploads/`.
 
-The JSON endpoint used by the new flow is **`POST /api/dub-from-storage`**. The original multipart **`POST /api/dub`** remains available for non-browser clients.
+The JSON endpoint used by the new flow is **`POST /api/dub-from-storage`**. The original multipart **`POST /api/dub`** remains available for non-browser clients. Modal workers use the same R2 credentials from the `my-repo-secrets` secret: they read the shared input volume, process the job, and upload final audio/video/transcript results back to R2 with temporary download URLs.
 
 ---
 
