@@ -316,9 +316,9 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     timeout=600,
 )
 class generate_zonos_speech_worker:
-    @modal.enter()
+    @modal.enter(snap=True)
     def setup(self):
-        """Runs once when container boots. Pre-loads model into VRAM."""
+        """Preload the model before snapshot creation and restore."""
         SHARED_VOLUME.reload()
         
         # Import your helper and main generation function
