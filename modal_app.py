@@ -141,6 +141,7 @@ l4_image = (
             "WHISPER_MODEL": "large-v3",
             "WHISPER_BATCH_SIZE": "4",
             "WHISPER_COMPUTE_TYPE": "float16",
+            "ENABLE_SPEAKER_DIARIZATION": "1",
             "PYTHONPATH": "/root/backend",
         }
     )
@@ -307,7 +308,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     image=zonos2_image,
     gpu="L4",
     max_containers=1,
-    scaledown_window=100,
+    scaledown_window=5,
     enable_memory_snapshot=True,
     experimental_options={"enable_gpu_snapshot": True},
     volumes={"/root/models": MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
@@ -365,7 +366,7 @@ class generate_zonos_speech_worker:
     image=l4_image,
     gpu="L4",
     max_containers=1,
-    scaledown_window=100,
+    scaledown_window=5,
     volumes={MODEL_CACHE_DIR: MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
     timeout=1800,
@@ -424,6 +425,7 @@ def process_gpu_pipeline(
         model_name="large-v3",
         compute_type=os.getenv("WHISPER_COMPUTE_TYPE", "float16"),
         batch_size=int(os.getenv("WHISPER_BATCH_SIZE", "4")),
+        enable_diarization=True,
     )
     if not segments:
         raise RuntimeError("WhisperX returned no speech segments")
@@ -440,28 +442,43 @@ def process_gpu_pipeline(
         tgt_lang,
     )
 
-        # ---- 4. Voice Cloning (Parallel Testing Mode) ----
-    print(f"[{job_id}] Zonos Voice Cloning - Preparing Test Truncation")
+    # ---- 4. Voice Cloning references ----
+    print(f"[{job_id}] Zonos Voice Cloning - Preparing speaker references")
     ref_source_path = (
         vocals_path
         if separate_stems and os.path.exists(vocals_path)
         else audio_path
     )
 
-    reference_path = job_dir / "voice_reference.wav"
     source_audio = AudioSegment.from_file(ref_source_path)
-    audio_duration_ms = len(source_audio)
-    reference_end_ms = min(audio_duration_ms, 10_000)
-    source_audio[:reference_end_ms].export(
-        str(reference_path),
-        format="wav",
+    speaker_reference_paths: dict[str, str] = {}
+    for speaker in sorted({segment.get("speaker") for segment in segments if segment.get("speaker")}):
+        speaker_audio = AudioSegment.empty()
+        for segment in segments:
+            if segment.get("speaker") != speaker:
+                continue
+            start_ms = max(0, int(float(segment.get("start", 0.0)) * 1000))
+            end_ms = min(len(source_audio), int(float(segment.get("end", 0.0)) * 1000))
+            if end_ms > start_ms:
+                speaker_audio += source_audio[start_ms:end_ms]
+            if len(speaker_audio) >= 10_000:
+                break
+        if len(speaker_audio) > 0:
+            reference_path = job_dir / f"voice_reference_{speaker}.wav"
+            speaker_audio[:10_000].export(str(reference_path), format="wav")
+            speaker_reference_paths[str(speaker)] = str(reference_path)
+
+    default_reference_path = job_dir / "voice_reference.wav"
+    source_audio[: min(len(source_audio), 10_000)].export(
+        str(default_reference_path), format="wav"
     )
+    speaker_reference_paths.setdefault("default", str(default_reference_path))
 
     SHARED_VOLUME.commit()
 
     return {
-    "translated_segments": translated_segments,
-    "reference_audio": str(reference_path),
+        "translated_segments": translated_segments,
+        "speaker_reference_audios": speaker_reference_paths,
     }
 
 # -------------------------------------------------------------
@@ -628,7 +645,7 @@ def run_modal_job(
         )
 
         translated_segments = gpu_results["translated_segments"]
-        reference_audio = gpu_results["reference_audio"]
+        speaker_reference_audios = gpu_results["speaker_reference_audios"]
 
         texts = []
         output_paths = []
@@ -645,7 +662,12 @@ def run_modal_job(
             output_paths.append(
                 str(job_dir / f"raw_seg_{index}.wav")
             )
-            reference_audios.append(reference_audio)
+            reference_audios.append(
+                speaker_reference_audios.get(
+                    str(segment.get("speaker")),
+                    speaker_reference_audios["default"],
+                )
+            )
             languages.append(target_language)
 
         if texts:

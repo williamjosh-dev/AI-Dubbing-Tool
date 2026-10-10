@@ -111,6 +111,7 @@ def generate_speech(
             text,
             TTSSamplingParams(
                 temperature=1.15,
+                topk=106,
                 top_p=0.0,
                 min_p=0.18,
                 repetition_penalty=1.2,
@@ -119,7 +120,7 @@ def generate_speech(
             ),
             language=norm_lang,
             speaker_embedding=speaker_embedding,
-            text_normalization=False,  # Disable Zonos2 text normalization to preserve original text
+            text_normalization=True,
         )
         model.save_audio(result["audio"], str(output))
     except Exception as e:

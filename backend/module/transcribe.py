@@ -32,6 +32,72 @@ groq_api_key = os.getenv("GROQ_API_KEY")
 groq_client = Groq(api_key=groq_api_key) if groq_api_key else None
 
 
+def assign_speakers(
+    audio_file_path: str,
+    segments: List[Dict[str, Any]],
+    device: str = "cuda",
+) -> List[Dict[str, Any]]:
+    """Attach the pyannote speaker label with the greatest overlap to each segment."""
+    if not segments:
+        return segments
+
+    token = (
+        os.getenv("HF_TOKEN")
+        or os.getenv("HUGGINGFACE_TOKEN")
+        or os.getenv("PYANNOTE_AUTH_TOKEN")
+    )
+    if not token:
+        print(
+            "⚠️ Speaker diarization disabled: set HF_TOKEN (with access to "
+            "pyannote/speaker-diarization-3.1) to preserve separate voices."
+        )
+        return segments
+
+    try:
+        from pyannote.audio import Pipeline
+
+        model_name = os.getenv("PYANNOTE_MODEL", "pyannote/speaker-diarization-3.1")
+        try:
+            diarization_pipeline = Pipeline.from_pretrained(model_name, token=token)
+        except TypeError:
+            # pyannote.audio 3.1.x uses the older keyword name.
+            diarization_pipeline = Pipeline.from_pretrained(
+                model_name, use_auth_token=token
+            )
+        if device == "cuda" and torch.cuda.is_available():
+            diarization_pipeline.to(torch.device("cuda"))
+
+        diarization = diarization_pipeline(audio_file_path)
+        turns = [
+            (float(turn.start), float(turn.end), str(speaker))
+            for turn, _, speaker in diarization.itertracks(yield_label=True)
+        ]
+    except Exception as exc:
+        print(f"⚠️ Speaker diarization failed; using unlabelled segments: {exc}")
+        return segments
+
+    labelled_segments: List[Dict[str, Any]] = []
+    for segment in segments:
+        start = float(segment.get("start", 0.0))
+        end = float(segment.get("end", start))
+        overlap_by_speaker: Dict[str, float] = {}
+        for turn_start, turn_end, speaker in turns:
+            overlap = max(0.0, min(end, turn_end) - max(start, turn_start))
+            if overlap:
+                overlap_by_speaker[speaker] = overlap_by_speaker.get(speaker, 0.0) + overlap
+
+        labelled = dict(segment)
+        if overlap_by_speaker:
+            labelled["speaker"] = max(overlap_by_speaker, key=overlap_by_speaker.get)
+        labelled_segments.append(labelled)
+
+    del diarization_pipeline
+    gc.collect()
+    if device == "cuda" and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return labelled_segments
+
+
 def align_with_whisperx(
     audio_file_path: str,
     segments: List[Dict[str, Any]],
@@ -100,6 +166,7 @@ def transcribe_audio_whisperx_full(
     model_name: str = "large-v3",
     compute_type: str = "float16",
     batch_size: int = 4,
+    enable_diarization: bool = True,
 ) -> List[Dict[str, Any]]:
     """Full local WhisperX pipeline (Transcription + Forced Alignment)."""
     if not os.path.exists(audio_path):
@@ -127,7 +194,8 @@ def transcribe_audio_whisperx_full(
         if device == "cuda" and torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    return align_with_whisperx(audio_path, raw_segments, language, device)
+    segments = align_with_whisperx(audio_path, raw_segments, language, device)
+    return assign_speakers(audio_path, segments, device) if enable_diarization else segments
 
 
 def transcribe_audio(
@@ -141,6 +209,12 @@ def transcribe_audio(
     device = os.getenv("WHISPER_DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
     compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "float16" if device == "cuda" else "int8")
     batch_size = int(os.getenv("WHISPER_BATCH_SIZE", "4"))
+    enable_diarization = os.getenv("ENABLE_SPEAKER_DIARIZATION", "1").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
     segments: List[Dict[str, Any]] = []
     used_groq = False
@@ -180,6 +254,8 @@ def transcribe_audio(
     # 2. Forced Alignment / Local Fallback Execution
     if used_groq and segments and enable_alignment:
         segments = align_with_whisperx(audio_path, segments, language, device)
+        if enable_diarization:
+            segments = assign_speakers(audio_path, segments, device)
 
     elif not segments:
         segments = transcribe_audio_whisperx_full(
@@ -189,6 +265,7 @@ def transcribe_audio(
             model_name=os.getenv("WHISPER_MODEL", "large-v3"),
             compute_type=compute_type,
             batch_size=batch_size,
+            enable_diarization=enable_diarization,
         )
 
     if not segments:
@@ -220,6 +297,9 @@ def transcribe_audio(
                 for w in segment["words"]
                 if isinstance(w, dict) and "word" in w
             ]
+
+        if segment.get("speaker"):
+            seg_data["speaker"] = str(segment["speaker"])
 
         formatted_output.append(seg_data)
 

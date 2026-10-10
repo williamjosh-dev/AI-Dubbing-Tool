@@ -37,6 +37,7 @@ It's built to be genuinely usable, not a demo. Every stage of the pipeline — t
 - **Transcribes speech with word-level accuracy** using WhisperX, which gives tighter timestamps than plain Whisper — the kind of precision dubbing actually needs to stay in sync.
 - **Translates sentence by sentence** through the Groq API, not as one giant block of text. This keeps timing sensible, keeps translation fast, and makes the output easier to read or edit later.
 - **Clones the original speaker's voice** using Zonos-2 and generates the translated line in that same voice, so the dub still sounds like the person who said it — not a generic narrator.
+- **Separates speakers before cloning** with pyannote diarization, so each dialogue segment uses the correct speaker reference instead of one voice reference for the whole recording.
 - **Cleans up the audio** before translation if you want — normalizes loudness, removes some of the harshness, gets it to a consistent level.
 - **Rebuilds the video** with the new audio track dropped in, keeping the original picture untouched.
 - **Gives you everything to download** — the dubbed audio, the translated transcript, and the final video, all from one dashboard.
@@ -76,6 +77,10 @@ Keeping these stages separated means a change to any one model or provider doesn
 **5. Translation, segment by segment.** Each line gets sent to Groq and translated on its own rather than as one big paragraph. This keeps the pacing closer to the original and avoids the translator collapsing meaning across sentence boundaries.
 
 **6. Voice cloning and generation.** A reference of the original speaker's voice is passed to Zonos-2 along with the translated line, producing a new voice track that sounds like the same speaker, now saying it in the target language.
+
+For multi-speaker recordings, pyannote assigns each WhisperX segment a `speaker` label and the Modal pipeline builds one reference clip per detected speaker. Configure `HF_TOKEN` with access to `pyannote/speaker-diarization-3.1`; without it, the pipeline logs a warning and uses the fallback single reference.
+
+Zonos2 receives the normalized target-language code (`en_us`, `en_gb`, `fr_fr`, `de`, `es`, `it`, `pt_br`, `ja`, `cmn`, or `ko`) for every generated segment. Its documented baseline sampling settings are used: temperature `1.15`, top-k `106`, top-p disabled, min-p `0.18`, and repetition penalty `1.2`. Text normalization remains enabled so numbers, dates, and currency are pronounced using the target language rather than copied from the source-language spelling.
 
 **7. Reassembly, if it was a video.** The new audio gets placed back onto the original video stream. The picture is never touched — only the sound changes.
 
