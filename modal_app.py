@@ -748,3 +748,5 @@ def fastapi_app():
 
     from backend.app import app as local_fastapi_app
     return local_fastapi_app
+
+# modal run modal_app.py::create_beta_token --minutes 3 --expires-days 7
