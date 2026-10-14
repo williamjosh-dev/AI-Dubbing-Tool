@@ -76,19 +76,6 @@ Final outputs are returned to the application and made available for download.
 
 This project is a beta commercial application. It is intended for controlled production evaluation, deployment, and operational use, with outputs suitable for teams that require a practical dubbing workflow without a manual editing pipeline.
 
-## Anonymous job history
-
-Sign-up is not required for the initial beta. Each job is associated with a
-non-reversible hash of the visitor IP address and the job metadata is stored in
-the existing database `jobs` table. The dashboard shows queued and processing
-jobs for that visitor, while History shows completed and failed jobs with their
-download links. The raw IP address is not stored.
-
-Set `ANONYMOUS_IP_SECRET` in production to a stable private value so anonymous
-job ownership remains consistent across restarts. If the API runs behind a
-trusted reverse proxy, its first `X-Forwarded-For` address is used as the
-visitor address.
-
 ## Delivered output
 
 - Dubbed audio file
