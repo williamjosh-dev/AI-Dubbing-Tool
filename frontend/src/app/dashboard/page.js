@@ -1,13 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Upload, Clock, Cpu, FileDown, Search, MoreVertical } from 'lucide-react';
 
 const pipelineCards = [
   {
     title: 'Queued Uploads',
-    value: '3',
+    value: '0',
     detail: 'Files waiting to enter the pipeline',
     icon: Upload,
     trend: '+1 in the last 10 min',
@@ -53,30 +53,32 @@ const cardAccentStyles = {
 };
 
 const statusStyles = {
-  Queued: 'bg-slate-100 text-slate-700 ring-slate-600/20',
-  Transcribing: 'bg-amber-50 text-amber-700 ring-amber-600/20',
-  Translating: 'bg-blue-50 text-blue-700 ring-blue-600/20',
-  Rendering: 'bg-violet-50 text-violet-700 ring-violet-600/20',
+  queued: 'bg-slate-100 text-slate-700 ring-slate-600/20',
+  processing: 'bg-amber-50 text-amber-700 ring-amber-600/20',
+  completed: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
+  failed: 'bg-red-50 text-red-700 ring-red-600/20',
 };
 
 export default function DashboardPage() {
   const [query, setQuery] = useState('');
   const [jobs, setJobs] = useState([]);
 
+  useEffect(() => {
+    fetch('/api/jobs')
+      .then((response) => response.json().then((data) => ({ response, data })))
+      .then(({ response, data }) => {
+        if (!response.ok) throw new Error(data.detail || 'Could not load jobs.');
+        setJobs(data.jobs || []);
+      })
+      .catch((loadError) => console.error(loadError));
+  }, []);
+
   const filteredJobs = jobs.filter((job) =>
-    job.name.toLowerCase().includes(query.toLowerCase())
+    job.filename.toLowerCase().includes(query.toLowerCase())
   );
 
   const handleNewUpload = () => {
-    const newJob = {
-      id: Date.now(),
-      name: `New upload ${jobs.length + 1}`,
-      status: 'Queued',
-      lang: 'EN → ES',
-      progress: 8,
-    };
-
-    setJobs((currentJobs) => [newJob, ...currentJobs]);
+    window.location.href = '/dubbing';
   };
 
   return (
@@ -122,7 +124,11 @@ export default function DashboardPage() {
                   <Icon className={`h-4 w-4 ${styles.iconText}`} />
                 </div>
               </div>
-              <p className="mt-3 text-xl font-semibold text-slate-900">{value}</p>
+              <p className="mt-3 text-xl font-semibold text-slate-900">
+                {title === 'Queued Uploads'
+                  ? jobs.filter((job) => ['queued', 'processing'].includes(job.status)).length
+                  : value}
+              </p>
               <p className="mt-1 text-sm text-slate-500">{detail}</p>
               <p className={`mt-3 text-xs font-medium ${styles.trend}`}>{trend}</p>
             </article>
@@ -137,7 +143,7 @@ export default function DashboardPage() {
             <h2 className="text-base font-semibold text-slate-900">
               {jobs.length === 0
                 ? 'No jobs yet'
-                : `${filteredJobs.length} job${filteredJobs.length !== 1 ? 's' : ''} in progress`}
+                : `${filteredJobs.length} job${filteredJobs.length !== 1 ? 's' : ''}`}
             </h2>
           </div>
           <div className="relative">
@@ -172,22 +178,18 @@ export default function DashboardPage() {
             <div key={job.id} className="flex items-center justify-between gap-4 px-5 py-4">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <strong className="truncate text-sm font-medium text-slate-900">{job.name}</strong>
-                  <span className="text-xs text-slate-400">{job.lang}</span>
-                </div>
-                <div className="mt-2 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-slate-100">
-                  <div
-                    className="h-full rounded-full bg-indigo-500 transition-all"
-                    style={{ width: `${job.progress}%` }}
-                  />
-                </div>
+                  <strong className="truncate text-sm font-medium text-slate-900">{job.filename}</strong>
+                    <span className="text-xs text-slate-400">
+                      {job.sourceLanguage?.toUpperCase()} → {job.targetLanguage?.toUpperCase()}
+                    </span>
+                  </div>
               </div>
 
               <span
-                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${statusStyles[job.status]}`}
+                  className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium capitalize ring-1 ring-inset ${statusStyles[job.status] || statusStyles.queued}`}
               >
-                <Clock className="h-3 w-3" />
-                {job.status}
+                  <Clock className="h-3 w-3" />
+                  {job.status}
               </span>
 
               <button className="rounded-md p-1.5 text-slate-400 hover:bg-slate-50 hover:text-slate-600">

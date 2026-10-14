@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from sqlalchemy import create_engine, Column, String, DateTime, Integer, Text, Float
+from sqlalchemy import create_engine, Column, String, DateTime, Integer, Text, Float, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -21,6 +21,11 @@ class Job(Base):
     audio_url = Column(String(500), nullable=True)
     video_url = Column(String(500), nullable=True)
     transcript_url = Column(String(500), nullable=True)
+    owner_key = Column(String(64), nullable=True, index=True)
+    filename = Column(String(255), nullable=True)
+    source_language = Column(String(16), nullable=True)
+    target_language = Column(String(16), nullable=True)
+    output_format = Column(String(16), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -54,6 +59,19 @@ class BetaToken(Base):
 def init_db():
     """Create tables if they don't exist."""
     Base.metadata.create_all(bind=engine)
+    # create_all does not add columns to an already deployed jobs table.
+    columns = {column["name"] for column in inspect(engine).get_columns("jobs")}
+    additions = {
+        "owner_key": "VARCHAR(64)",
+        "filename": "VARCHAR(255)",
+        "source_language": "VARCHAR(16)",
+        "target_language": "VARCHAR(16)",
+        "output_format": "VARCHAR(16)",
+    }
+    with engine.begin() as connection:
+        for name, column_type in additions.items():
+            if name not in columns:
+                connection.execute(text(f"ALTER TABLE jobs ADD COLUMN {name} {column_type}"))
 
 
 def get_db():

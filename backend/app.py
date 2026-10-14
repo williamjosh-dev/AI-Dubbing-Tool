@@ -12,7 +12,7 @@ from typing import Optional
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -36,6 +36,7 @@ EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 DISCORD_FEEDBACK_WEBHOOK_URL = os.getenv("DISCORD_FEEDBACK_WEBHOOK_URL")
 BETA_ACCESS_REQUIRED = os.getenv("BETA_ACCESS_REQUIRED", "1").lower() in {"1", "true", "yes", "on"}
 BETA_MAX_JOB_SECONDS = float(os.getenv("BETA_MAX_JOB_SECONDS", "90"))
+ANONYMOUS_IP_SECRET = os.getenv("ANONYMOUS_IP_SECRET", "ai-dubbing-anonymous-ip-v1")
 
 LANGUAGE_ALIASES = {
     "english": "en",
@@ -88,6 +89,32 @@ def normalize_language(value: str, default: str) -> str:
     if not normalized:
         return default
     return LANGUAGE_ALIASES.get(normalized, normalized)
+
+
+def get_owner_key(request: Request) -> str:
+    """Return a stable, non-reversible identifier for this anonymous visitor."""
+    forwarded_for = request.headers.get("x-forwarded-for")
+    ip_address = forwarded_for.split(",", 1)[0].strip() if forwarded_for else None
+    ip_address = ip_address or (request.client.host if request.client else "unknown")
+    return hashlib.sha256(f"{ANONYMOUS_IP_SECRET}:{ip_address}".encode()).hexdigest()
+
+
+def serialize_job(job: Job) -> dict:
+    return {
+        "jobId": job.job_id,
+        "filename": job.filename or f"Job {job.job_id}",
+        "status": job.status,
+        "error": job.error,
+        "sourceLanguage": job.source_language,
+        "targetLanguage": job.target_language,
+        "outputFormat": job.output_format,
+        "downloadUrl": job.download_url,
+        "audioUrl": job.audio_url,
+        "videoUrl": job.video_url,
+        "transcriptUrl": job.transcript_url,
+        "createdAt": job.created_at.isoformat() if job.created_at else None,
+        "updatedAt": job.updated_at.isoformat() if job.updated_at else None,
+    }
 
 
 def normalize_output_format(value: str) -> str:
@@ -444,6 +471,7 @@ def run_dubbing_pipeline(
 
 @app.post("/api/dub")
 def dub_audio(
+    request: Request,
     background_tasks: BackgroundTasks,
     audioFile: UploadFile = File(...),
     srcLang: str = Form("en"),
@@ -499,7 +527,15 @@ def dub_audio(
     db = SessionLocal()
     job = None
     try:
-        job = Job(job_id=job_id, status="queued")
+        job = Job(
+            job_id=job_id,
+            status="queued",
+            owner_key=get_owner_key(request),
+            filename=audioFile.filename,
+            source_language=source_language,
+            target_language=target_language,
+            output_format=output_format,
+        )
         db.add(job)
         db.commit()
         if BETA_ACCESS_REQUIRED:
@@ -574,6 +610,7 @@ def dub_audio(
 def dub_from_storage(
     payload: DubJobRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
 ) -> dict:
     """Create a job after the browser has uploaded the source directly to R2."""
     if not is_ffmpeg_available():
@@ -608,7 +645,15 @@ def dub_from_storage(
     db = SessionLocal()
     job = None
     try:
-        job = Job(job_id=job_id, status="queued")
+        job = Job(
+            job_id=job_id,
+            status="queued",
+            owner_key=get_owner_key(request),
+            filename=payload.filename,
+            source_language=source_language,
+            target_language=target_language,
+            output_format=output_format,
+        )
         db.add(job)
         db.commit()
         if BETA_ACCESS_REQUIRED:
@@ -657,17 +702,43 @@ def dub_from_storage(
 
     return {"jobId": job_id, "status": "queued"}
 
+@app.get("/api/jobs")
+def list_jobs(request: Request, db: Session = Depends(get_db)) -> dict:
+    jobs = (
+        db.query(Job)
+        .filter(Job.owner_key == get_owner_key(request))
+        .order_by(Job.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    return {"jobs": [serialize_job(job) for job in jobs]}
+
+
+@app.delete("/api/jobs/history")
+def clear_job_history(request: Request, db: Session = Depends(get_db)) -> dict:
+    deleted = (
+        db.query(Job)
+        .filter(
+            Job.owner_key == get_owner_key(request),
+            Job.status.in_(("completed", "failed")),
+        )
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"deleted": deleted}
+
+
 @app.get("/api/status/{job_id}")
-def get_job_status(job_id: str, db: Session = Depends(get_db)) -> dict:
-    job = db.query(Job).filter(Job.job_id == job_id).first()
+def get_job_status(job_id: str, request: Request, db: Session = Depends(get_db)) -> dict:
+    job = (
+        db.query(Job)
+        .filter(Job.job_id == job_id, Job.owner_key == get_owner_key(request))
+        .first()
+    )
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
-    return {
-        "jobId": job.job_id,
-        "status": job.status,
-        "error": job.error,
-        "downloadUrl": job.download_url,
-        "result": (
+    job_data = serialize_job(job)
+    job_data["result"] = (
             {
                 "audioUrl": job.audio_url,
                 "videoUrl": job.video_url,
@@ -675,10 +746,8 @@ def get_job_status(job_id: str, db: Session = Depends(get_db)) -> dict:
             }
             if job.status == "completed"
             else None
-        ),
-        "createdAt": job.created_at.isoformat(),
-        "updatedAt": job.updated_at.isoformat(),
-    }
+        )
+    return job_data
 
 
 if __name__ == "__main__":
