@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from elevenlabs import AudioSegment
+from fastapi import background
 import modal
 import requests
 
@@ -388,6 +390,7 @@ def process_gpu_pipeline(
     from backend.module.transcribe import transcribe_audio_whisperx_full
     from backend.module.translate import translate_segments
 
+ 
     # ---- 1. Demucs separation ----
     job_dir = Path(STORAGE_DIR) / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -398,16 +401,34 @@ def process_gpu_pipeline(
 
     if separate_stems:
         print(f"[{job_id}] Demucs Separation")
-        demucs_worker = DemucsBackend(model_name="htdemucs", device="cuda")
+
+        demucs_worker = DemucsBackend(
+            model_name="htdemucs",
+            device="cuda",
+        )
+
         with open(audio_path, "rb") as f:
             raw_audio_bytes = f.read()
 
-        stems = demucs_worker.separate_stems(raw_audio_bytes, stems=["vocals", "no_vocals"])
+        stems = demucs_worker.separate_stems(
+            raw_audio_bytes,
+            stems=["vocals", "no_vocals"],
+        )
 
         with open(vocals_path, "wb") as f:
             f.write(stems["vocals"])
+
         with open(background_path, "wb") as f:
             f.write(stems["no_vocals"])
+
+        # Diagnose the actual files produced by Demucs
+        original = AudioSegment.from_file(audio_path)
+        background = AudioSegment.from_file(background_path)
+
+        print(f"[AUDIO] Original duration: {len(original)} ms")
+        print(f"[AUDIO] Background duration: {len(background)} ms")
+        print(f"[AUDIO] Original RMS: {original.dBFS:.2f} dBFS")
+        print(f"[AUDIO] Background RMS: {background.dBFS:.2f} dBFS")
 
         target_transcription_audio = vocals_path
         SHARED_VOLUME.commit()
@@ -415,6 +436,7 @@ def process_gpu_pipeline(
         del demucs_worker
         gc.collect()
         torch.cuda.empty_cache()
+
 
     # ---- 2. WhisperX transcription ----
     print(f"[{job_id}] WhisperX Transcription")
@@ -511,7 +533,13 @@ def assemble_and_finish_container(
     final_video_path = os.path.join(job_dir, "final_dubbed.mp4")
 
     background_path = os.path.join(job_dir, "background_track.wav")
-    base_audio = AudioSegment.from_file(background_path if os.path.exists(background_path) else original_video_path)
+
+    if os.path.exists(background_path):
+        base_audio = AudioSegment.from_file(background_path)
+        print(f"[ASSEMBLY] Using background stem: {background_path}")
+    else:
+        base_audio = AudioSegment.from_file(original_video_path)
+        print("[ASSEMBLY] WARNING: No background stem; using original audio")
 
     timeline = AudioSegment.silent(duration=len(base_audio)).overlay(base_audio)
 
