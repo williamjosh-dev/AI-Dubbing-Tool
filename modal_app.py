@@ -4,8 +4,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from elevenlabs import AudioSegment
-from fastapi import background
 import modal
 import requests
 
