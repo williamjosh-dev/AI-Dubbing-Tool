@@ -27,7 +27,8 @@ cpu_image = (
         "gstreamer1.0-plugins-good",
     )
     .pip_install(
-        "fastapi[standard]",
+        "fastapi",
+        "uvicorn",
         "groq",
         "numpy<2.0.0",
         "protobuf>=5.0.0",
