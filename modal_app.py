@@ -704,7 +704,7 @@ def run_modal_job(
             )
 
             list(
-                generate_zonos_speech_worker().generate.map(
+                generate_zonos_speech_worker.generate.map(
                     texts,
                     output_paths,
                     reference_audios,
