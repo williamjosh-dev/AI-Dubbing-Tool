@@ -2,6 +2,7 @@ import gc
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import modal
@@ -29,6 +30,7 @@ cpu_image = (
     .pip_install(
         "fastapi",
         "uvicorn",
+        "python-multipart",
         "groq",
         "numpy<2.0.0",
         "protobuf>=5.0.0",
@@ -314,7 +316,7 @@ def extract_audio_container(job_id: str, video_path: str) -> str:
     experimental_options={"enable_gpu_snapshot": True},
     volumes={"/root/models": MODEL_VOLUME, STORAGE_DIR: SHARED_VOLUME},
     secrets=[modal.Secret.from_name("my-repo-secrets")],
-    timeout=600,
+    timeout=1800,
 )
 class generate_zonos_speech_worker:
     @modal.enter(snap=True)
@@ -330,6 +332,29 @@ class generate_zonos_speech_worker:
         _get_zonos_model()
         
         self.generate_speech = generate_speech
+
+    @modal.method()
+    def warmup(self, job_id: str, timeout_seconds: int = 1700) -> None:
+        """Keep the initialized worker available until the pipeline is ready."""
+        marker_dir = Path(STORAGE_DIR) / str(job_id)
+        ready_marker = marker_dir / ".zonos-ready"
+        failed_marker = marker_dir / ".zonos-failed"
+        deadline = time.monotonic() + timeout_seconds
+
+        while time.monotonic() < deadline:
+            SHARED_VOLUME.reload()
+            if failed_marker.exists():
+                raise RuntimeError(
+                    f"Zonos warm-up cancelled because the pipeline failed for job {job_id}."
+                )
+            if ready_marker.exists():
+                print(f"[{job_id}] Zonos2 worker is warmed and ready.")
+                return
+            time.sleep(2)
+
+        raise TimeoutError(
+            f"Timed out waiting for the pipeline to prepare Zonos references for job {job_id}."
+        )
 
     @modal.method()
     def generate(
@@ -497,6 +522,9 @@ def process_gpu_pipeline(
 
     SHARED_VOLUME.commit()
 
+    (job_dir / ".zonos-ready").write_text("ready", encoding="utf-8")
+    SHARED_VOLUME.commit()
+
     return {
         "translated_segments": translated_segments,
         "speaker_reference_audios": speaker_reference_paths,
@@ -661,6 +689,8 @@ def run_modal_job(
         job.status = "processing"
         db.commit()
 
+        zonos_warmup_call = generate_zonos_speech_worker.warmup.spawn(job_id)
+
         working_audio_path = extract_audio_container.remote(job_id, source_path)
         
         gpu_results = process_gpu_pipeline.remote(
@@ -670,6 +700,8 @@ def run_modal_job(
             target_language,
             separate_stems=enhance_audio,
         )
+
+        zonos_warmup_call.get()
 
         translated_segments = gpu_results["translated_segments"]
         speaker_reference_audios = gpu_results["speaker_reference_audios"]
@@ -747,6 +779,9 @@ def run_modal_job(
             "transcriptUrl": job.transcript_url,
         }
     except Exception as exc:
+        if "zonos_warmup_call" in locals():
+            (job_dir / ".zonos-failed").write_text(str(exc)[:500], encoding="utf-8")
+            SHARED_VOLUME.commit()
         db.rollback()
         job.status = "failed"
         job.error = str(exc)[:500]
