@@ -5,7 +5,9 @@ import Link from 'next/link';
 import {
     AlertCircle,
     ArrowRight,
+    Check,
     CheckCircle2,
+    ChevronDown,
     FileAudio2,
     FileVideo2,
     Globe2,
@@ -14,6 +16,7 @@ import {
     LoaderCircle,
     Music2,
     PlayCircle,
+    Search,
     Settings2,
     UploadCloud,
     SlidersHorizontal,
@@ -121,6 +124,85 @@ function formatError(error) {
     if (typeof error === 'string') return error;
     if (Array.isArray(error)) return error.map((item) => item?.msg || item?.message || String(item)).join(', ');
     return error.detail || error.message || JSON.stringify(error);
+}
+
+function LanguagePicker({ label, hint, value, options, onChange, accent = 'indigo' }) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [query, setQuery] = useState('');
+    const selectedLanguage = options.find((language) => language.value === value);
+    const filteredLanguages = options.filter((language) => language.label.toLowerCase().includes(query.trim().toLowerCase()));
+    const accentClasses = accent === 'sky'
+        ? { active: 'border-sky-500 ring-sky-100', icon: 'bg-sky-50 text-sky-600', selected: 'bg-sky-50 text-sky-700' }
+        : { active: 'border-indigo-500 ring-indigo-100', icon: 'bg-indigo-50 text-indigo-600', selected: 'bg-indigo-50 text-indigo-700' };
+
+    return (
+        <div className="relative">
+            <div className="flex items-start justify-between gap-3">
+                <div>
+                    <p className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                        <Languages className={`h-4 w-4 ${accent === 'sky' ? 'text-sky-600' : 'text-indigo-600'}`} />
+                        {label}
+                    </p>
+                    {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+                </div>
+                <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${accentClasses.selected}`}>
+                    {selectedLanguage?.label || value}
+                </span>
+            </div>
+
+            <button
+                type="button"
+                onClick={() => setIsOpen((open) => !open)}
+                aria-expanded={isOpen}
+                className={`mt-4 flex w-full items-center justify-between gap-3 rounded-xl border bg-white px-3.5 py-3 text-left shadow-sm transition focus:outline-none focus:ring-4 ${isOpen ? accentClasses.active : 'border-slate-200 hover:border-slate-300'}`}
+            >
+                <span className="flex min-w-0 items-center gap-3">
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-bold ${accentClasses.icon}`}>
+                        {selectedLanguage?.label.slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className="truncate text-sm font-medium text-slate-800">{selectedLanguage?.label}</span>
+                </span>
+                <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition ${isOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isOpen && (
+                <div className="absolute inset-x-0 top-full z-20 mt-2 rounded-xl border border-slate-200 bg-white p-2 shadow-xl shadow-slate-200/70">
+                    <div className="relative">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <input
+                            autoFocus
+                            value={query}
+                            onChange={(event) => setQuery(event.target.value)}
+                            placeholder="Search languages"
+                            aria-label={`Search ${label.toLowerCase()}`}
+                            className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                        />
+                    </div>
+                    <div className="mt-2 max-h-56 overflow-y-auto" role="listbox" aria-label={label}>
+                        {filteredLanguages.length ? filteredLanguages.map((language) => (
+                            <button
+                                key={language.value}
+                                type="button"
+                                role="option"
+                                aria-selected={value === language.value}
+                                onClick={() => {
+                                    onChange(language.value);
+                                    setIsOpen(false);
+                                    setQuery('');
+                                }}
+                                className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition ${value === language.value ? accentClasses.selected : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
+                            >
+                                <span>{language.label}</span>
+                                {value === language.value && <Check className="h-4 w-4" />}
+                            </button>
+                        )) : (
+                            <p className="px-3 py-4 text-center text-sm text-slate-500">No languages found</p>
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
 }
 
 function startJobPolling(jobId, { onStatus, onComplete, onFailure }) {
@@ -628,52 +710,24 @@ export default function DubbingPage() {
 
                         <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
                             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                                <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                                    <Languages className="h-4 w-4 text-indigo-600" />
-                                    Source language
-                                </span>
-                                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="Source language">
-                                    {sourceLanguages.map((language) => (
-                                        <button
-                                            key={language.value}
-                                            type="button"
-                                            aria-pressed={selectedSource === language.value}
-                                            onClick={() => setSelectedSource(language.value)}
-                                            className={`min-h-10 rounded-lg border px-3 py-2 text-left text-sm font-medium transition-all duration-200 ${selectedSource === language.value
-                                                ? 'border-indigo-600 bg-indigo-600 text-white shadow-md shadow-indigo-200 ring-2 ring-indigo-200 ring-offset-1'
-                                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:-translate-y-0.5 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700'
-                                                }`}
-                                        >
-                                            {language.label}
-                                        </button>
-                                    ))}
-                                </div>
+                                <LanguagePicker
+                                    label="Source language"
+                                    hint="What language is spoken in the original file?"
+                                    value={selectedSource}
+                                    options={sourceLanguages}
+                                    onChange={setSelectedSource}
+                                />
                             </div>
 
                             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                                <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                                    <Languages className="h-4 w-4 text-indigo-600" />
-                                    Target language · Zonos2 TTS
-                                </span>
-                                <p className="mt-1 text-xs text-slate-500">
-                                    These are the languages currently supported for generated voice output.
-                                </p>
-                                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="Target language">
-                                    {targetLanguages.map((language) => (
-                                        <button
-                                            key={language.value}
-                                            type="button"
-                                            aria-pressed={selectedTarget === language.value}
-                                            onClick={() => setSelectedTarget(language.value)}
-                                            className={`min-h-10 rounded-lg border px-3 py-2 text-left text-sm font-medium transition-all duration-200 ${selectedTarget === language.value
-                                                ? 'border-sky-600 bg-sky-600 text-white shadow-md shadow-sky-200 ring-2 ring-sky-200 ring-offset-1'
-                                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:-translate-y-0.5 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700'
-                                                }`}
-                                        >
-                                            {language.label}
-                                        </button>
-                                    ))}
-                                </div>
+                                <LanguagePicker
+                                    label="Target language · Zonos2 TTS"
+                                    hint="Choose the language for the generated voice output."
+                                    value={selectedTarget}
+                                    options={targetLanguages}
+                                    onChange={setSelectedTarget}
+                                    accent="sky"
+                                />
                             </div>
                         </div>
 
