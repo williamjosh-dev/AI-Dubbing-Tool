@@ -3,20 +3,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
+    AlertCircle,
     ArrowRight,
-    Clapperboard,
+    CheckCircle2,
     FileAudio2,
+    FileVideo2,
     Globe2,
     KeyRound,
     Languages,
+    LoaderCircle,
     Music2,
     PlayCircle,
     Settings2,
-    Sparkles,
     UploadCloud,
-    ShieldCheck,
     SlidersHorizontal,
     WandSparkles,
+    X,
 } from 'lucide-react';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
@@ -100,6 +102,14 @@ const quickStats = [
     { label: 'Mode', value: 'Live upload', tone: 'bg-slate-100 text-slate-700 ring-slate-200' },
 ];
 
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+const ALLOWED_UPLOAD_EXTENSIONS = new Set(['mp3', 'wav', 'ogg', 'flac', 'm4a', 'mp4', 'mov', 'avi', 'mkv', 'webm']);
+
+function formatFileSize(bytes) {
+    if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function buildMediaUrl(path) {
     if (!path) return '';
     if (/^https?:\/\//i.test(path)) return path;
@@ -179,6 +189,7 @@ export default function DubbingPage() {
     const [betaToken, setBetaToken] = useState('');
     const [betaAccess, setBetaAccess] = useState(null);
     const [isValidatingToken, setIsValidatingToken] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
 
     useEffect(() => {
         const savedJob = window.localStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
@@ -240,12 +251,34 @@ export default function DubbingPage() {
         [selectedSource, selectedTarget, selectedVoiceMethod, selectedFormat]
     );
 
-    const handleFileChange = (event) => {
-        const file = event.target.files?.[0] || null;
+    const handleFileSelection = (file) => {
+        if (!file) return;
+        const extension = file.name.split('.').pop()?.toLowerCase();
+        if (!extension || !ALLOWED_UPLOAD_EXTENSIONS.has(extension)) {
+            setSelectedFile(null);
+            setError('That file type is not supported. Choose MP3, WAV, MP4, MOV, or another supported format.');
+            return;
+        }
+        if (file.size <= 0 || file.size > MAX_UPLOAD_BYTES) {
+            setSelectedFile(null);
+            setError('Files must be larger than 0 and no bigger than 100 MB.');
+            return;
+        }
         setSelectedFile(file);
         setError('');
         setResult(null);
         setJobStatus('');
+    };
+
+    const handleFileChange = (event) => {
+        handleFileSelection(event.target.files?.[0]);
+        event.target.value = '';
+    };
+
+    const handleDrop = (event) => {
+        event.preventDefault();
+        setIsDragging(false);
+        if (!isSubmitting) handleFileSelection(event.dataTransfer.files?.[0]);
     };
 
     const handleValidateToken = async () => {
@@ -359,6 +392,26 @@ export default function DubbingPage() {
             const audioUrl = result?.audioUrl ? buildMediaUrl(result.audioUrl) : '';
             const videoUrl = result?.videoUrl ? buildMediaUrl(result.videoUrl) : '';
             const transcriptUrl = result?.transcriptUrl ? buildMediaUrl(result.transcriptUrl) : '';
+    const uploadStatus = isSubmitting
+        ? jobStatus.toLowerCase().includes('upload')
+            ? 'uploading'
+            : 'processing'
+        : result
+            ? 'complete'
+            : error
+                ? 'error'
+                : selectedFile
+                    ? 'ready'
+                    : 'idle';
+    const uploadStatusCopy = {
+        idle: { eyebrow: 'Ready when you are', title: 'Drop your media here', detail: 'or browse from your device', icon: UploadCloud },
+        ready: { eyebrow: 'File selected', title: 'Ready to create your dub', detail: 'Review your settings, then start the workflow', icon: CheckCircle2 },
+        uploading: { eyebrow: 'Uploading securely', title: 'Sending your file to storage', detail: 'Keep this tab open while the upload finishes', icon: LoaderCircle },
+        processing: { eyebrow: 'Dubbing in progress', title: 'Your voices are being generated', detail: jobStatus || 'Transcribing, translating, and synthesizing', icon: LoaderCircle },
+        complete: { eyebrow: 'Dub complete', title: 'Your files are ready', detail: 'Download or preview the generated result', icon: CheckCircle2 },
+        error: { eyebrow: 'Upload needs attention', title: 'We could not use that file', detail: 'Choose another file or try again', icon: AlertCircle },
+    }[uploadStatus];
+    const UploadStatusIcon = uploadStatusCopy.icon;
     return (
         <form
             className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
@@ -461,45 +514,71 @@ export default function DubbingPage() {
                             </span>
                         </div>
 
-                        <label htmlFor="dubbing-upload-input" className="mt-4 block cursor-pointer upload-dropzone">
-                            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600/10 text-indigo-600">
-                                <Clapperboard className="h-6 w-6" />
-                            </div>
-                            <p className="mt-4 text-lg font-semibold text-slate-900">Drop your audio or video here</p>
-                            <p className="mt-2 text-sm text-slate-500">
-                                The selected file will be posted to the backend as multipart form data and processed end to end.
-                            </p>
-
-                            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                                <div className="flex flex-col items-center justify-center rounded-lg bg-white p-4 text-center ring-1 ring-slate-100">
-                                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600/10 text-indigo-600">
-                                        <FileAudio2 className="h-6 w-6" />
-                                    </div>
-                                    <p className="mt-3 font-medium text-slate-900">Upload file</p>
-                                    <p className="mt-1 text-xs text-slate-500">MP4, MOV, MP3, WAV, and more</p>
+                        <div
+                            role="button"
+                            tabIndex={isSubmitting ? -1 : 0}
+                            aria-disabled={isSubmitting}
+                            onClick={() => !isSubmitting && document.getElementById('dubbing-upload-input')?.click()}
+                            onKeyDown={(event) => {
+                                if (!isSubmitting && (event.key === 'Enter' || event.key === ' ')) {
+                                    event.preventDefault();
+                                    document.getElementById('dubbing-upload-input')?.click();
+                                }
+                            }}
+                            onDragEnter={(event) => {
+                                event.preventDefault();
+                                if (!isSubmitting) setIsDragging(true);
+                            }}
+                            onDragOver={(event) => event.preventDefault()}
+                            onDragLeave={() => setIsDragging(false)}
+                            onDrop={handleDrop}
+                            className={`upload-dropzone mt-4 ${isDragging ? 'upload-dropzone-active' : ''} upload-dropzone-${uploadStatus}`}
+                        >
+                            <div className="flex flex-col items-center">
+                                <div className="upload-status-icon">
+                                    <UploadStatusIcon className={`h-7 w-7 ${uploadStatus === 'uploading' || uploadStatus === 'processing' ? 'animate-spin' : ''}`} />
                                 </div>
-
-                                <div className="flex flex-col items-center justify-center rounded-lg bg-white p-4 text-center ring-1 ring-slate-100">
-                                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-sky-600/10 text-sky-600">
-                                        <Sparkles className="h-6 w-6" />
-                                    </div>
-                                    <p className="mt-3 font-medium text-slate-900">Translate</p>
-                                    <p className="mt-1 text-xs text-slate-500">Segmented transcription and translation</p>
-                                </div>
-
-                                <div className="flex flex-col items-center justify-center rounded-lg bg-white p-4 text-center ring-1 ring-slate-100">
-                                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600/10 text-emerald-600">
-                                        <ShieldCheck className="h-6 w-6" />
-                                    </div>
-                                    <p className="mt-3 font-medium text-slate-900">Download</p>
-                                    <p className="mt-1 text-xs text-slate-500">Audio, transcript, and optional video</p>
-                                </div>
+                                <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{uploadStatusCopy.eyebrow}</p>
+                                <p className="mt-2 text-xl font-semibold text-slate-950">{uploadStatusCopy.title}</p>
+                                <p className="mt-2 text-sm text-slate-500">{uploadStatusCopy.detail}</p>
                             </div>
 
-                            <p className="mt-4 text-xs text-slate-400">
-                                Click Browse file to choose a local clip, then press Start dubbing.
-                            </p>
-                        </label>
+                            {selectedFile ? (
+                                <div className="upload-file-card" onClick={(event) => event.stopPropagation()}>
+                                    <div className="flex min-w-0 items-center gap-3">
+                                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-950 text-white">
+                                            {selectedFile.type.startsWith('video/') ? <FileVideo2 className="h-5 w-5" /> : <FileAudio2 className="h-5 w-5" />}
+                                        </div>
+                                        <div className="min-w-0 text-left">
+                                            <p className="truncate text-sm font-semibold text-slate-900">{selectedFile.name}</p>
+                                            <p className="mt-1 text-xs text-slate-500">{formatFileSize(selectedFile.size)} · {selectedFile.type || 'Media file'}</p>
+                                        </div>
+                                    </div>
+                                    {!isSubmitting && (
+                                        <button
+                                            type="button"
+                                            aria-label="Remove selected file"
+                                            onClick={() => {
+                                                setSelectedFile(null);
+                                                setError('');
+                                                setResult(null);
+                                            }}
+                                            className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="mt-7 flex flex-wrap justify-center gap-2 text-xs font-medium text-slate-500">
+                                    <span className="upload-format-chip">MP4</span>
+                                    <span className="upload-format-chip">MOV</span>
+                                    <span className="upload-format-chip">MP3</span>
+                                    <span className="upload-format-chip">WAV</span>
+                                    <span className="upload-format-chip">Up to 100 MB</span>
+                                </div>
+                            )}
+                        </div>
 
                         <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
                             <div className="panel-soft">
