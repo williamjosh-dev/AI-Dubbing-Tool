@@ -689,7 +689,11 @@ def run_modal_job(
         job.status = "processing"
         db.commit()
 
-        zonos_warmup_call = generate_zonos_speech_worker.warmup.spawn(job_id)
+        # 🌟 FIX 1: Instantiate the Modal Class handle once here
+        zonos_worker_instance = generate_zonos_speech_worker()
+
+        # 🌟 FIX 2: Use the instance handle to spawn the warmup container
+        zonos_warmup_call = zonos_worker_instance.warmup.spawn(job_id)
 
         working_audio_path = extract_audio_container.remote(job_id, source_path)
         
@@ -735,8 +739,9 @@ def run_modal_job(
                 f"{len(texts)} segments to Zonos workers..."
             )
 
+            # 🌟 FIX 3: Use the identical instance handle to map out the speech generation segments
             list(
-                generate_zonos_speech_worker.generate.map(
+                zonos_worker_instance.generate.map(
                     texts,
                     output_paths,
                     reference_audios,
