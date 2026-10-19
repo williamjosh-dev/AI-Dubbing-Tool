@@ -126,7 +126,7 @@ function formatError(error) {
     return error.detail || error.message || JSON.stringify(error);
 }
 
-function LanguagePicker({ label, hint, value, options, onChange, accent = 'indigo' }) {
+function LanguagePicker({ label, hint, value, options, onChange, disabledValues = [], onDisabledSelect, accent = 'indigo' }) {
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
     const selectedLanguage = options.find((language) => language.value === value);
@@ -186,14 +186,24 @@ function LanguagePicker({ label, hint, value, options, onChange, accent = 'indig
                                 role="option"
                                 aria-selected={value === language.value}
                                 onClick={() => {
+                                    if (disabledValues.includes(language.value)) {
+                                        onDisabledSelect?.();
+                                        return;
+                                    }
                                     onChange(language.value);
                                     setIsOpen(false);
                                     setQuery('');
                                 }}
-                                className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition ${value === language.value ? accentClasses.selected : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
+                                aria-disabled={disabledValues.includes(language.value)}
+                                className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition ${disabledValues.includes(language.value)
+                                    ? 'cursor-not-allowed text-slate-300'
+                                    : value === language.value
+                                        ? accentClasses.selected
+                                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                                    }`}
                             >
-                                <span>{language.label}</span>
-                                {value === language.value && <Check className="h-4 w-4" />}
+                                <span>{language.label}{disabledValues.includes(language.value) ? ' (same as other language)' : ''}</span>
+                                {value === language.value && !disabledValues.includes(language.value) && <Check className="h-4 w-4" />}
                             </button>
                         )) : (
                             <p className="px-3 py-4 text-center text-sm text-slate-500">No languages found</p>
@@ -273,6 +283,7 @@ export default function DubbingPage() {
     const [isValidatingToken, setIsValidatingToken] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
     const [cancelCountdown, setCancelCountdown] = useState(0);
+    const [languagePairError, setLanguagePairError] = useState('');
     const countdownTimeoutRef = useRef(null);
     const countdownIntervalRef = useRef(null);
 
@@ -403,9 +414,14 @@ export default function DubbingPage() {
             setError('Validate your beta access token before starting the dub.');
             return;
         }
+        if (selectedSource === selectedTarget) {
+            setLanguagePairError('Please choose two different languages for the source and target.');
+            return;
+        }
 
         setIsSubmitting(true);
         setError('');
+        setLanguagePairError('');
         setResult(null);
         setJobStatus('Queuing job...');
 
@@ -497,6 +513,10 @@ export default function DubbingPage() {
         }
         if (!betaAccess?.valid) {
             setError('Validate your beta access token before starting the dub.');
+            return;
+        }
+        if (selectedSource === selectedTarget) {
+            setLanguagePairError('Please choose two different languages for the source and target.');
             return;
         }
         if (cancelCountdown > 0 || isSubmitting) return;
@@ -759,7 +779,12 @@ export default function DubbingPage() {
                                     hint="What language is spoken in the original file?"
                                     value={selectedSource}
                                     options={sourceLanguages}
-                                    onChange={setSelectedSource}
+                                    disabledValues={[selectedTarget]}
+                                    onChange={(value) => {
+                                        setSelectedSource(value);
+                                        setLanguagePairError('');
+                                    }}
+                                    onDisabledSelect={() => setLanguagePairError('Source and target languages must be different.')}
                                 />
                             </div>
 
@@ -769,11 +794,22 @@ export default function DubbingPage() {
                                     hint="Choose the language for the generated voice output."
                                     value={selectedTarget}
                                     options={targetLanguages}
-                                    onChange={setSelectedTarget}
+                                    disabledValues={[selectedSource]}
+                                    onChange={(value) => {
+                                        setSelectedTarget(value);
+                                        setLanguagePairError('');
+                                    }}
+                                    onDisabledSelect={() => setLanguagePairError('Source and target languages must be different.')}
                                     accent="sky"
                                 />
                             </div>
                         </div>
+
+                        {languagePairError && (
+                            <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800" role="alert">
+                                {languagePairError}
+                            </p>
+                        )}
 
                         <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
                             <label className="panel-soft flex items-center justify-between gap-4">
