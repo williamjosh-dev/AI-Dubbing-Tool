@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
     AlertCircle,
@@ -272,6 +272,14 @@ export default function DubbingPage() {
     const [betaAccess, setBetaAccess] = useState(null);
     const [isValidatingToken, setIsValidatingToken] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
+    const [cancelCountdown, setCancelCountdown] = useState(0);
+    const countdownTimeoutRef = useRef(null);
+    const countdownIntervalRef = useRef(null);
+
+    useEffect(() => () => {
+        if (countdownTimeoutRef.current) window.clearTimeout(countdownTimeoutRef.current);
+        if (countdownIntervalRef.current) window.clearInterval(countdownIntervalRef.current);
+    }, []);
 
     useEffect(() => {
         const savedJob = window.localStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
@@ -386,7 +394,7 @@ export default function DubbingPage() {
         }
     };
 
-    const handleSubmit = async () => {
+    const executeDubbingJob = async () => {
         if (!selectedFile) {
             setError('Choose an audio or video file before starting the dub.');
             return;
@@ -471,6 +479,41 @@ export default function DubbingPage() {
             setJobStatus('');
             setIsSubmitting(false);
         }
+    };
+
+    const cancelDubbingStart = () => {
+        if (countdownTimeoutRef.current) window.clearTimeout(countdownTimeoutRef.current);
+        if (countdownIntervalRef.current) window.clearInterval(countdownIntervalRef.current);
+        countdownTimeoutRef.current = null;
+        countdownIntervalRef.current = null;
+        setCancelCountdown(0);
+        setJobStatus('Dubbing start canceled. Your file has not been uploaded.');
+    };
+
+    const handleSubmit = () => {
+        if (!selectedFile) {
+            setError('Choose an audio or video file before starting the dub.');
+            return;
+        }
+        if (!betaAccess?.valid) {
+            setError('Validate your beta access token before starting the dub.');
+            return;
+        }
+        if (cancelCountdown > 0 || isSubmitting) return;
+
+        setError('');
+        setJobStatus('Review your file and settings before upload.');
+        setCancelCountdown(8);
+        countdownIntervalRef.current = window.setInterval(() => {
+            setCancelCountdown((seconds) => Math.max(0, seconds - 1));
+        }, 1000);
+        countdownTimeoutRef.current = window.setTimeout(() => {
+            if (countdownIntervalRef.current) window.clearInterval(countdownIntervalRef.current);
+            countdownIntervalRef.current = null;
+            countdownTimeoutRef.current = null;
+            setCancelCountdown(0);
+            executeDubbingJob();
+        }, 8000);
     };
             const audioUrl = result?.audioUrl ? buildMediaUrl(result.audioUrl) : '';
             const videoUrl = result?.videoUrl ? buildMediaUrl(result.videoUrl) : '';
@@ -574,10 +617,10 @@ export default function DubbingPage() {
                         </label>
                         <button
                             type="submit"
-                            disabled={isSubmitting}
+                            disabled={isSubmitting || cancelCountdown > 0}
                             className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                            {isSubmitting ? 'Processing...' : 'Start dubbing'}
+                            {isSubmitting ? 'Processing...' : cancelCountdown > 0 ? `Starts in ${cancelCountdown}s` : 'Start dubbing'}
                             <ArrowRight className="h-4 w-4" />
                         </button>
                     </div>
@@ -760,14 +803,35 @@ export default function DubbingPage() {
                             </label>
                         </div>
 
+                        {cancelCountdown > 0 && (
+                            <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                                <div className="flex items-center gap-3 text-sm text-amber-900">
+                                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-sm font-bold text-amber-700">
+                                        {cancelCountdown}
+                                    </div>
+                                    <div>
+                                        <p className="font-semibold">Dubbing has not started yet</p>
+                                        <p className="text-xs text-amber-700">Review the file and language pair. Nothing has been uploaded.</p>
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={cancelDubbingStart}
+                                    className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100"
+                                >
+                                    Cancel start
+                                </button>
+                            </div>
+                        )}
+
                         <div className="mt-6 flex flex-wrap items-center gap-3">
                             <button
                                 type="submit"
-                                disabled={isSubmitting}
+                                disabled={isSubmitting || cancelCountdown > 0}
                                 className="btn-primary"
                             >
                                 <WandSparkles className="h-4 w-4" />
-                                {isSubmitting ? 'Processing...' : 'Start dubbing workflow'}
+                                {isSubmitting ? 'Processing...' : cancelCountdown > 0 ? `Starts in ${cancelCountdown}s` : 'Start dubbing workflow'}
                             </button>
                             <p className="text-sm text-slate-500">The response comes back with live download links from FastAPI.</p>
                         </div>
