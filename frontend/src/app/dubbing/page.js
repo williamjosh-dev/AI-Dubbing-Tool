@@ -335,10 +335,11 @@ export default function DubbingPage() {
 
     const handleFileSelection = (file) => {
         if (!file) return;
-        const extension = file.name.split('.').pop()?.toLowerCase();
+        const filename = file.name.trim();
+        const extension = filename.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
         if (!extension || !ALLOWED_UPLOAD_EXTENSIONS.has(extension)) {
             setSelectedFile(null);
-            setError('That file type is not supported. Choose MP3, WAV, MP4, MOV, or another supported format.');
+            setError(`'${filename || 'This file'}' is not supported. Choose MP3, WAV, MP4, MOV, or another supported format.`);
             return;
         }
         if (file.size <= 0 || file.size > MAX_UPLOAD_BYTES) {
@@ -491,7 +492,7 @@ export default function DubbingPage() {
         uploading: { eyebrow: 'Uploading securely', title: 'Sending your file to storage', detail: 'Keep this tab open while the upload finishes', icon: LoaderCircle },
         processing: { eyebrow: 'Dubbing in progress', title: 'Your voices are being generated', detail: jobStatus || 'Transcribing, translating, and synthesizing', icon: LoaderCircle },
         complete: { eyebrow: 'Dub complete', title: 'Your files are ready', detail: 'Download or preview the generated result', icon: CheckCircle2 },
-        error: { eyebrow: 'Upload needs attention', title: 'We could not use that file', detail: 'Choose another file or try again', icon: AlertCircle },
+        error: { eyebrow: 'Upload needs attention', title: 'Something needs fixing', detail: error, icon: AlertCircle },
     }[uploadStatus];
     const UploadStatusIcon = uploadStatusCopy.icon;
     return (
