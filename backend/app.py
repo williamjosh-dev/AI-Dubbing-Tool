@@ -4,6 +4,7 @@ import json
 import hashlib
 import shutil
 import subprocess
+import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -301,6 +302,12 @@ class DubJobRequest(BaseModel):
     betaToken: Optional[str] = None
 
 
+class GenerateTTSRequest(BaseModel):
+    translatedSegments: list[dict] = Field(..., min_length=1, max_length=2000)
+    outputFormat: str = "wav"
+    targetLanguage: str = "en"
+
+
 def notify_discord(feedback: Feedback) -> None:
     if not DISCORD_FEEDBACK_WEBHOOK_URL:
         return
@@ -407,6 +414,10 @@ def run_dubbing_pipeline(
             output_audio_path=str(dubbed_audio_path),
             transcript_path=str(transcript_path),
             save_translated_text=True,
+        )
+        (OUTPUT_DIR / f"{job_id}_segments.json").write_text(
+            json.dumps(pipeline_result.get("translated_segments", [])),
+            encoding="utf-8",
         )
 
         if is_video:
@@ -657,11 +668,104 @@ def dub_from_storage(
 
     return {"jobId": job_id, "status": "queued"}
 
+
+def regenerate_tts_job(job_id: str, translated_segments: list[dict], output_format: str, target_language: str) -> None:
+    from pydub import AudioSegment
+    from pydub.effects import speedup
+
+    db = SessionLocal()
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+    if not job:
+        db.close()
+        return
+
+    working_audio_path = OUTPUT_DIR / f"{job_id}_input.wav"
+    dubbed_audio_path = OUTPUT_DIR / f"{job_id}_dubbed.{output_format}"
+    transcript_path = OUTPUT_DIR / f"{job_id}_transcript.txt"
+    try:
+        source_audio = AudioSegment.from_file(working_audio_path)
+        timeline_audio = AudioSegment.silent(duration=len(source_audio))
+        pipeline = AudioTranslationPipeline(tgt_lang=target_language, voice_method="zonos2")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for index, segment in enumerate(translated_segments):
+                translated_text = str(segment.get("translated", "")).strip()
+                if not translated_text:
+                    continue
+                start_ms = max(0, int(float(segment.get("start", 0)) * 1000))
+                end_ms = min(len(source_audio), int(float(segment.get("end", 0)) * 1000))
+                target_duration_ms = max(100, end_ms - start_ms)
+                reference_path = Path(temp_dir) / f"reference_{index}.wav"
+                segment_path = Path(temp_dir) / f"segment_{index}.wav"
+                source_audio[start_ms:end_ms].export(reference_path, format="wav")
+                pipeline.synthesize(translated_text, str(segment_path), reference_audio=str(reference_path))
+                generated_audio = AudioSegment.from_file(segment_path)
+                if len(generated_audio) > target_duration_ms:
+                    generated_audio = speedup(
+                        generated_audio,
+                        playback_speed=min(len(generated_audio) / target_duration_ms, 1.35),
+                    )[:target_duration_ms]
+                timeline_audio = timeline_audio.overlay(generated_audio, position=start_ms)
+
+        timeline_audio.export(dubbed_audio_path, format=output_format)
+        with transcript_path.open("a", encoding="utf-8") as transcript:
+            transcript.write("\n\nEdited translated segments:\n")
+            for segment in translated_segments:
+                transcript.write(f"[{float(segment.get('start', 0)):.2f} - {float(segment.get('end', 0)):.2f}] {segment.get('translated', '')}\n")
+
+        output_uploader = upload_r2_file if os.getenv("R2_BUCKET_NAME") else upload_public_file
+        job.audio_url = output_uploader(dubbed_audio_path, job_id, "audio")
+        job.transcript_url = output_uploader(transcript_path, job_id, "transcript")
+        job.download_url = job.audio_url
+        (OUTPUT_DIR / f"{job_id}_segments.json").write_text(
+            json.dumps(translated_segments),
+            encoding="utf-8",
+        )
+        job.status = "completed"
+        db.commit()
+    except Exception as exc:
+        job.status = "failed"
+        job.error = str(exc)
+        db.commit()
+    finally:
+        db.close()
+
+
+@app.post("/api/jobs/{job_id}/generate-tts")
+def generate_tts(
+    job_id: str,
+    payload: GenerateTTSRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> dict:
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Dubbing job not found.")
+    output_format = normalize_output_format(payload.outputFormat)
+    job.status = "processing"
+    job.error = None
+    db.commit()
+    background_tasks.add_task(
+        regenerate_tts_job,
+        job_id,
+        payload.translatedSegments,
+        output_format,
+        normalize_language(payload.targetLanguage, "en"),
+    )
+    return {"jobId": job_id, "status": "processing"}
+
 @app.get("/api/status/{job_id}")
 def get_job_status(job_id: str, db: Session = Depends(get_db)) -> dict:
     job = db.query(Job).filter(Job.job_id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
+    translated_segments = []
+    segments_path = OUTPUT_DIR / f"{job_id}_segments.json"
+    if segments_path.exists():
+        try:
+            translated_segments = json.loads(segments_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            translated_segments = []
     return {
         "jobId": job.job_id,
         "status": job.status,
@@ -672,6 +776,8 @@ def get_job_status(job_id: str, db: Session = Depends(get_db)) -> dict:
                 "audioUrl": job.audio_url,
                 "videoUrl": job.video_url,
                 "transcriptUrl": job.transcript_url,
+                "translatedSegments": translated_segments,
+                "translatedText": " ".join(segment.get("translated", "") for segment in translated_segments),
             }
             if job.status == "completed"
             else None

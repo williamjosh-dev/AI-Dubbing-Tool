@@ -76,12 +76,22 @@ function getProcessingStage(status, isComplete) {
     return 1;
 }
 
+function formatTimestamp(seconds) {
+    const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+    const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+    const remainingSeconds = (totalSeconds % 60).toString().padStart(2, '0');
+    return `${minutes}:${remainingSeconds}`;
+}
+
 export default function DubbingEditorPage() {
     const [draft, setDraft] = useState(null);
+    const [jobId, setJobId] = useState('');
     const [jobStatus, setJobStatus] = useState('Preparing your editor...');
     const [result, setResult] = useState(null);
+    const [editedSegments, setEditedSegments] = useState([]);
     const [error, setError] = useState('');
     const [isWorking, setIsWorking] = useState(true);
+    const [isGeneratingTts, setIsGeneratingTts] = useState(false);
 
     useEffect(() => {
         let stopPolling;
@@ -92,6 +102,7 @@ export default function DubbingEditorPage() {
 
         const handleComplete = (jobResult) => {
             setResult(jobResult);
+            setEditedSegments(jobResult?.translatedSegments || []);
             setJobStatus('Your dub is ready.');
             setIsWorking(false);
             window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
@@ -106,7 +117,9 @@ export default function DubbingEditorPage() {
 
         if (activeJob) {
             setJobStatus('Restoring your dubbing job...');
-            stopPolling = startJobPolling(JSON.parse(activeJob).jobId, {
+            const savedJobId = JSON.parse(activeJob).jobId;
+            setJobId(savedJobId);
+            stopPolling = startJobPolling(savedJobId, {
                 onStatus: (status) => setJobStatus(`Status: ${status}...`),
                 onComplete: handleComplete,
                 onFailure: handleFailure,
@@ -155,6 +168,7 @@ export default function DubbingEditorPage() {
                     if (!response.ok) throw new Error(formatError(data));
 
                     window.localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify({ jobId: data.jobId }));
+                    setJobId(data.jobId);
                     setJobStatus('Your dub is processing...');
                     stopPolling = startJobPolling(data.jobId, {
                         onStatus: (status) => setJobStatus(`Status: ${status}...`),
@@ -179,6 +193,52 @@ export default function DubbingEditorPage() {
     const transcriptUrl = buildMediaUrl(result?.transcriptUrl);
     const currentStage = getProcessingStage(jobStatus, Boolean(result));
     const progressPercent = result ? 100 : Math.max(8, Math.round((currentStage / processingSteps.length) * 100));
+
+    const updateTranslatedSegment = (index, translated) => {
+        setEditedSegments((segments) => segments.map((segment, segmentIndex) => (
+            segmentIndex === index ? { ...segment, translated } : segment
+        )));
+    };
+
+    const handleGenerateTts = async () => {
+        if (!jobId || !editedSegments.length || isGeneratingTts) return;
+        setIsGeneratingTts(true);
+        setError('');
+        setResult(null);
+        setJobStatus('Creating a new voice track from your edited text...');
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/generate-tts`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    translatedSegments: editedSegments,
+                    outputFormat: draft?.selectedFormat || 'wav',
+                    targetLanguage: draft?.selectedTarget || 'en',
+                }),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(formatError(data));
+
+            startJobPolling(data.jobId, {
+                onStatus: (status) => setJobStatus(`Updating your dubbed audio: ${status}...`),
+                onComplete: (jobResult) => {
+                    setResult(jobResult);
+                    setEditedSegments(jobResult.translatedSegments || editedSegments);
+                    setJobStatus('Your updated dub is ready.');
+                    setIsGeneratingTts(false);
+                },
+                onFailure: (jobError) => {
+                    setError(jobError instanceof Error ? jobError.message : 'Could not create the updated voice track.');
+                    setJobStatus('The updated voice track could not be created.');
+                    setIsGeneratingTts(false);
+                },
+            });
+        } catch (generationError) {
+            setError(generationError instanceof Error ? generationError.message : 'Could not create the updated voice track.');
+            setJobStatus('The updated voice track could not be created.');
+            setIsGeneratingTts(false);
+        }
+    };
 
     return (
         <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
@@ -253,6 +313,55 @@ export default function DubbingEditorPage() {
                             })}
                         </div>
                     </section>
+
+                    {editedSegments.length > 0 && (
+                        <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+                            <div className="flex flex-wrap items-start justify-between gap-4">
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">Translation review</p>
+                                    <h2 className="mt-2 text-lg font-semibold text-white">Shape the words before the final voice</h2>
+                                    <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">The translated lines are ready for your edits. Timestamps and original words stay locked so the new voice keeps the same timing.</p>
+                                </div>
+                                <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-slate-300">{editedSegments.length} timed lines</span>
+                            </div>
+
+                            <div className="mt-6 space-y-3">
+                                {editedSegments.map((segment, index) => (
+                                    <div key={`${segment.start}-${index}`} className="rounded-xl border border-white/10 bg-slate-950/40 p-4">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <span className="text-xs font-semibold tabular-nums text-indigo-300">
+                                                {formatTimestamp(segment.start)} - {formatTimestamp(segment.end)}
+                                            </span>
+                                            <span className="text-xs text-slate-500">Original words cannot be changed</span>
+                                        </div>
+                                        <p className="mt-3 rounded-lg bg-white/[0.04] px-3 py-2 text-sm leading-5 text-slate-400">{segment.text || 'No original text available.'}</p>
+                                        <label className="mt-3 block">
+                                            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-emerald-300">Translated text</span>
+                                            <textarea
+                                                value={segment.translated || ''}
+                                                onChange={(event) => updateTranslatedSegment(index, event.target.value)}
+                                                rows={2}
+                                                className="w-full resize-y rounded-lg border border-emerald-300/20 bg-slate-900 px-3 py-2.5 text-sm leading-6 text-white placeholder:text-slate-600 focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-300/20"
+                                            />
+                                        </label>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-white/10 pt-5">
+                                <p className="text-sm text-slate-400">Your edited lines will be used to create the new voice track.</p>
+                                <button
+                                    type="button"
+                                    onClick={handleGenerateTts}
+                                    disabled={isGeneratingTts || isWorking}
+                                    className="inline-flex items-center gap-2 rounded-xl bg-emerald-400 px-4 py-3 text-sm font-bold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {isGeneratingTts && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                                    {isGeneratingTts ? 'Generating new voice...' : 'Generate TTS from edited text'}
+                                </button>
+                            </div>
+                        </section>
+                    )}
 
                     {result && (
                         <div className="mt-8 grid gap-3 sm:grid-cols-3">
