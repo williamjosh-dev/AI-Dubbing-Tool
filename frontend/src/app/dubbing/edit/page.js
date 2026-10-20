@@ -55,6 +55,27 @@ function startJobPolling(jobId, { onStatus, onComplete, onFailure }) {
     };
 }
 
+const processingSteps = [
+    { title: 'Prepare your file', detail: 'We check the file and get it ready for the dubbing process.' },
+    { title: 'Pull out the original audio', detail: 'We separate the spoken sound from the video so every word can be handled clearly.' },
+    { title: 'Write down what was said', detail: 'We listen to the original voice and create a time-matched written version.' },
+    { title: 'Translate each part', detail: 'We turn the written words into your chosen language while keeping the timing in mind.' },
+    { title: 'Create the new voice', detail: 'We generate a natural voice track from the translated words.' },
+    { title: 'Finish your dubbed file', detail: 'We bring the new voice and original video together and prepare your result.' },
+];
+
+function getProcessingStage(status, isComplete) {
+    if (isComplete) return processingSteps.length;
+    const normalizedStatus = status.toLowerCase();
+    if (normalizedStatus.includes('upload') || normalizedStatus.includes('prepar')) return 1;
+    if (normalizedStatus.includes('extract') || normalizedStatus.includes('audio')) return 2;
+    if (normalizedStatus.includes('transcrib') || normalizedStatus.includes('listen')) return 3;
+    if (normalizedStatus.includes('translat')) return 4;
+    if (normalizedStatus.includes('synth') || normalizedStatus.includes('voice') || normalizedStatus.includes('speech')) return 5;
+    if (normalizedStatus.includes('assembl') || normalizedStatus.includes('render') || normalizedStatus.includes('finish')) return 6;
+    return 1;
+}
+
 export default function DubbingEditorPage() {
     const [draft, setDraft] = useState(null);
     const [jobStatus, setJobStatus] = useState('Preparing your editor...');
@@ -156,6 +177,8 @@ export default function DubbingEditorPage() {
     const audioUrl = buildMediaUrl(result?.audioUrl);
     const videoUrl = buildMediaUrl(result?.videoUrl);
     const transcriptUrl = buildMediaUrl(result?.transcriptUrl);
+    const currentStage = getProcessingStage(jobStatus, Boolean(result));
+    const progressPercent = result ? 100 : Math.max(8, Math.round((currentStage / processingSteps.length) * 100));
 
     return (
         <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
@@ -193,7 +216,43 @@ export default function DubbingEditorPage() {
                         </div>
                     </div>
 
-                    {isWorking && <div className="mt-8 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full w-2/5 animate-pulse rounded-full bg-indigo-400" /></div>}
+                    {isWorking && <div className="mt-8 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-indigo-400 transition-all duration-700" style={{ width: `${progressPercent}%` }} /></div>}
+
+                    <section className="mt-8 rounded-2xl border border-white/10 bg-white/[0.04] p-5 sm:p-6" aria-live="polite">
+                        <div className="flex flex-wrap items-end justify-between gap-3">
+                            <div>
+                                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">Your project journey</p>
+                                <h2 className="mt-2 text-lg font-semibold text-white">We are taking care of each part</h2>
+                            </div>
+                            <p className="text-sm font-semibold text-slate-300">{progressPercent}% ready</p>
+                        </div>
+                        <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+                            <div className="h-full rounded-full bg-indigo-400 transition-all duration-700" style={{ width: `${progressPercent}%` }} />
+                        </div>
+
+                        <div className="mt-6 space-y-3">
+                            {processingSteps.map((step, index) => {
+                                const stepNumber = index + 1;
+                                const isDone = stepNumber < currentStage || Boolean(result);
+                                const isCurrent = !result && stepNumber === currentStage;
+                                return (
+                                    <div key={step.title} className={`flex gap-3 rounded-xl border p-4 transition ${isCurrent ? 'border-indigo-300/40 bg-indigo-400/10' : isDone ? 'border-emerald-300/10 bg-emerald-400/[0.04]' : 'border-white/5 bg-white/[0.02]'}`}>
+                                        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${isDone ? 'bg-emerald-400/20 text-emerald-300' : isCurrent ? 'bg-indigo-400 text-slate-950' : 'bg-white/10 text-slate-500'}`}>
+                                            {isDone ? <CheckCircle2 className="h-4 w-4" /> : isCurrent ? <LoaderCircle className="h-4 w-4 animate-spin" /> : stepNumber}
+                                        </div>
+                                        <div className="min-w-0">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <h3 className={`text-sm font-semibold ${isCurrent ? 'text-white' : isDone ? 'text-emerald-200' : 'text-slate-400'}`}>{step.title}</h3>
+                                                {isCurrent && <span className="rounded-full bg-indigo-300/15 px-2 py-0.5 text-[11px] font-semibold text-indigo-200">In progress</span>}
+                                                {isDone && !isCurrent && <span className="text-[11px] font-semibold text-emerald-300">Done</span>}
+                                            </div>
+                                            <p className="mt-1 text-sm leading-5 text-slate-400">{step.detail}</p>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </section>
 
                     {result && (
                         <div className="mt-8 grid gap-3 sm:grid-cols-3">
