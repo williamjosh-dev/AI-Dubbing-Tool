@@ -15,7 +15,6 @@ import {
     Languages,
     LoaderCircle,
     Music2,
-    PlayCircle,
     Search,
     Settings2,
     UploadCloud,
@@ -97,12 +96,6 @@ const qualityOptions = [
     { label: 'Transcription', value: 'Local Whisper', tone: 'text-emerald-700 bg-emerald-50 ring-emerald-200' },
     { label: 'Translation', value: 'Segmented', tone: 'text-sky-700 bg-sky-50 ring-sky-200' },
     { label: 'Output', value: 'Audio + video', tone: 'text-amber-700 bg-amber-50 ring-amber-200' },
-];
-
-const quickStats = [
-    { label: 'API', value: 'Connected', tone: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
-    { label: 'Backend', value: 'FastAPI', tone: 'bg-indigo-50 text-indigo-700 ring-indigo-200' },
-    { label: 'Mode', value: 'Live upload', tone: 'bg-slate-100 text-slate-700 ring-slate-200' },
 ];
 
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
@@ -535,9 +528,6 @@ export default function DubbingPage() {
             executeDubbingJob();
         }, 8000);
     };
-            const audioUrl = result?.audioUrl ? buildMediaUrl(result.audioUrl) : '';
-            const videoUrl = result?.videoUrl ? buildMediaUrl(result.videoUrl) : '';
-            const transcriptUrl = result?.transcriptUrl ? buildMediaUrl(result.transcriptUrl) : '';
     const uploadStatus = isSubmitting
         ? jobStatus.toLowerCase().includes('upload')
             ? 'uploading'
@@ -648,7 +638,7 @@ export default function DubbingPage() {
             </header>
 
             <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-12">
-                <main className="lg:col-span-8 space-y-6">
+                <main className="lg:col-span-12 space-y-6">
                     <section className="panel">
                         <div className="flex items-center justify-between gap-4">
                             <div className="flex items-center gap-3">
@@ -935,81 +925,6 @@ export default function DubbingPage() {
                     </section>
                 </main>
 
-                <aside className="lg:col-span-4 space-y-6">
-                    <div className="sticky top-24 space-y-6">
-                        <div className="bg-slate-950 rounded-lg p-6 text-white shadow-inner">
-                            <div className="flex items-center gap-2">
-                                <PlayCircle className="h-5 w-5 text-indigo-400" />
-                                <h3 className="text-lg font-semibold">Result preview</h3>
-                            </div>
-
-                            <div className="mt-4 space-y-3 text-sm text-slate-300">
-                                <div className="flex items-center justify-between text-xs text-slate-400">
-                                    <span>Status</span>
-                                    <span>{isSubmitting ? 'Processing' : result ? 'Complete' : 'Waiting'}</span>
-                                </div>
-                                <div className="h-40 rounded-lg border border-white/10 bg-gradient-to-br from-slate-800 via-slate-900 to-indigo-950" />
-                                <p className="text-slate-300">
-                                    {result ? 'Downloads are ready below.' : 'Start a job to see the generated files and transcript summary.'}
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="panel">
-                            <p className="text-sm font-semibold text-slate-900">Quick status</p>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                                {quickStats.map((item) => (
-                                    <span key={item.label} className={`summary-chip ${item.tone}`}>
-                                        {item.label}: {item.value}
-                                    </span>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="panel">
-                            <p className="text-sm font-semibold text-slate-900">Download links</p>
-                            <div className="mt-3 space-y-3 text-sm">
-                                {audioUrl ? (
-                                    <a className="block rounded-lg border border-slate-200 px-4 py-3 font-medium text-indigo-700 hover:bg-indigo-50" href={audioUrl} target="_blank" rel="noreferrer">
-                                        Download dubbed audio
-                                    </a>
-                                ) : (
-                                    <div className="rounded-lg border border-slate-200 px-4 py-3 text-slate-400">Audio will appear here after processing.</div>
-                                )}
-
-                                {videoUrl ? (
-                                    <a className="block rounded-lg border border-slate-200 px-4 py-3 font-medium text-indigo-700 hover:bg-indigo-50" href={videoUrl} target="_blank" rel="noreferrer">
-                                        Download dubbed video
-                                    </a>
-                                ) : null}
-
-                                {transcriptUrl ? (
-                                    <a className="block rounded-lg border border-slate-200 px-4 py-3 font-medium text-indigo-700 hover:bg-indigo-50" href={transcriptUrl} target="_blank" rel="noreferrer">
-                                        Download transcript
-                                    </a>
-                                ) : null}
-                            </div>
-                        </div>
-
-                        {result?.translatedText ? (
-                            <div className="panel">
-                                <p className="text-sm font-semibold text-slate-900">Translated text</p>
-                                <p className="mt-3 text-sm text-slate-600">{result.translatedText}</p>
-                                <p className="mt-3 text-xs text-slate-400">
-                                    {result.translatedSegments?.length || 0} translated segments returned by the backend.
-                                </p>
-                            </div>
-                        ) : null}
-
-                        {audioUrl ? (
-                            <div className="panel">
-                                <p className="text-sm font-semibold text-slate-900">Playback</p>
-                                <audio className="mt-3 w-full" controls src={audioUrl} />
-                                {videoUrl ? <video className="mt-4 w-full rounded-lg border border-slate-200" controls src={videoUrl} /> : null}
-                            </div>
-                        ) : null}
-                    </div>
-                </aside>
             </div>
         </form>
     );
