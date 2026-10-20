@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { setDubbingDraft } from './project-store';
 import {
     AlertCircle,
     ArrowRight,
@@ -24,7 +25,6 @@ import {
 } from 'lucide-react';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
-const ACTIVE_JOB_STORAGE_KEY = 'ai-dubbing-active-job';
 const BETA_TOKEN_STORAGE_KEY = 'ai-dubbing-beta-token';
 
 const supportedLanguages = [
@@ -104,12 +104,6 @@ const ALLOWED_UPLOAD_EXTENSIONS = new Set(['mp3', 'wav', 'ogg', 'flac', 'm4a', '
 function formatFileSize(bytes) {
     if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function buildMediaUrl(path) {
-    if (!path) return '';
-    if (/^https?:\/\//i.test(path)) return path;
-    return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
 }
 
 function formatError(error) {
@@ -208,46 +202,6 @@ function LanguagePicker({ label, hint, value, options, onChange, disabledValues 
     );
 }
 
-function startJobPolling(jobId, { onStatus, onComplete, onFailure }) {
-    let isCancelled = false;
-    let timeoutId;
-
-    const checkStatus = async () => {
-        try {
-            const response = await fetch(`${API_BASE_URL}/api/status/${jobId}`);
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(formatError(data));
-            }
-
-            if (isCancelled) return;
-
-            if (data.status === 'completed') {
-                onComplete(data.result);
-                return;
-            }
-
-            if (data.status === 'failed') {
-                onFailure(new Error(data.error || 'Dubbing processing failed on the backend.'));
-                return;
-            }
-
-            onStatus(data.status);
-            timeoutId = window.setTimeout(checkStatus, 3000);
-        } catch (pollError) {
-            if (!isCancelled) onFailure(pollError);
-        }
-    };
-
-    checkStatus();
-
-    return () => {
-        isCancelled = true;
-        if (timeoutId) window.clearTimeout(timeoutId);
-    };
-}
-
 async function validateBetaToken(token) {
     const response = await fetch(`${API_BASE_URL}/api/beta/validate`, {
         method: 'POST',
@@ -277,49 +231,16 @@ export default function DubbingPage() {
     const [isDragging, setIsDragging] = useState(false);
     const [cancelCountdown, setCancelCountdown] = useState(0);
     const [languagePairError, setLanguagePairError] = useState('');
+    const [isRedirecting, setIsRedirecting] = useState(false);
     const countdownTimeoutRef = useRef(null);
     const countdownIntervalRef = useRef(null);
+    const redirectTimeoutRef = useRef(null);
+    const router = useRouter();
 
     useEffect(() => () => {
         if (countdownTimeoutRef.current) window.clearTimeout(countdownTimeoutRef.current);
         if (countdownIntervalRef.current) window.clearInterval(countdownIntervalRef.current);
-    }, []);
-
-    useEffect(() => {
-        const savedJob = window.localStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
-        if (!savedJob) return undefined;
-
-        let parsedJob;
-        try {
-            parsedJob = JSON.parse(savedJob);
-        } catch {
-            window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
-            return undefined;
-        }
-
-        if (!parsedJob?.jobId) {
-            window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
-            return undefined;
-        }
-
-        setIsSubmitting(true);
-        setJobStatus('Restoring your dubbing job...');
-
-        return startJobPolling(parsedJob.jobId, {
-            onStatus: (status) => setJobStatus(`Status: ${status}...`),
-            onComplete: (jobResult) => {
-                setResult(jobResult);
-                setJobStatus('');
-                setIsSubmitting(false);
-                window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
-            },
-            onFailure: (pollError) => {
-                setError(pollError instanceof Error ? pollError.message : 'Could not restore the dubbing job.');
-                setJobStatus('');
-                setIsSubmitting(false);
-                window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
-            },
-        });
+        if (redirectTimeoutRef.current) window.clearTimeout(redirectTimeoutRef.current);
     }, []);
 
     useEffect(() => {
@@ -373,7 +294,7 @@ export default function DubbingPage() {
     const handleDrop = (event) => {
         event.preventDefault();
         setIsDragging(false);
-        if (!isSubmitting) handleFileSelection(event.dataTransfer.files?.[0]);
+        if (!isSubmitting && !isRedirecting) handleFileSelection(event.dataTransfer.files?.[0]);
     };
 
     const handleValidateToken = async () => {
@@ -395,98 +316,6 @@ export default function DubbingPage() {
             setError(tokenError instanceof Error ? tokenError.message : 'Could not validate the beta token.');
         } finally {
             setIsValidatingToken(false);
-        }
-    };
-
-    const executeDubbingJob = async () => {
-        if (!selectedFile) {
-            setError('Choose an audio or video file before starting the dub.');
-            return;
-        }
-        if (!betaAccess?.valid) {
-            setError('Validate your beta access token before starting the dub.');
-            return;
-        }
-        if (selectedSource === selectedTarget) {
-            setLanguagePairError('Please choose two different languages for the source and target.');
-            return;
-        }
-
-        setIsSubmitting(true);
-        setError('');
-        setLanguagePairError('');
-        setResult(null);
-        setJobStatus('Queuing job...');
-
-        try {
-            const tokenResponse = await fetch('/api/upload-token', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    filename: selectedFile.name,
-                    contentType: selectedFile.type || 'application/octet-stream',
-                    size: selectedFile.size,
-                }),
-            });
-            const tokenData = await tokenResponse.json();
-            if (!tokenResponse.ok) throw new Error(formatError(tokenData));
-
-            setJobStatus('Uploading file directly to storage...');
-            const uploadResponse = await fetch(tokenData.uploadUrl, {
-                method: 'PUT',
-                headers: { 'Content-Type': selectedFile.type || 'application/octet-stream' },
-                body: selectedFile,
-            });
-            if (!uploadResponse.ok) throw new Error('The file upload to storage failed.');
-
-            setJobStatus('Queuing job...');
-            const response = await fetch(`${API_BASE_URL}/api/dub-from-storage`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    objectKey: tokenData.objectKey,
-                    filename: selectedFile.name,
-                    srcLang: selectedSource,
-                    tgtLang: selectedTarget,
-                    voiceClone: voiceClone ? 'on' : 'off',
-                    voiceMethod: selectedVoiceMethod,
-                    outputFormat: selectedFormat,
-                    enhanceAudio: enhanceAudio ? 'on' : 'off',
-                    betaToken,
-                }),
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(formatError(data));
-            }
-
-            const jobId = data.jobId;
-            window.localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify({ jobId }));
-            setJobStatus('Processing dubbing task...');
-
-            startJobPolling(jobId, {
-                onStatus: (status) => setJobStatus(`Status: ${status}...`),
-                onComplete: (jobResult) => {
-                    setResult(jobResult);
-                    setJobStatus('');
-                    setIsSubmitting(false);
-                    window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
-                    validateBetaToken(betaToken).then(setBetaAccess).catch(() => {});
-                },
-                onFailure: (pollError) => {
-                    setError(pollError instanceof Error ? pollError.message : 'Dubbing processing failed.');
-                    setJobStatus('');
-                    setIsSubmitting(false);
-                    window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
-                },
-            });
-
-        } catch (submitError) {
-            setError(submitError instanceof Error ? submitError.message : 'Failed to submit the job.');
-            setJobStatus('');
-            setIsSubmitting(false);
         }
     };
 
@@ -515,7 +344,7 @@ export default function DubbingPage() {
         if (cancelCountdown > 0 || isSubmitting) return;
 
         setError('');
-        setJobStatus('Review your file and settings before upload.');
+        setJobStatus('Creating your project space... Redirecting to editor.');
         setCancelCountdown(8);
         countdownIntervalRef.current = window.setInterval(() => {
             setCancelCountdown((seconds) => Math.max(0, seconds - 1));
@@ -525,7 +354,18 @@ export default function DubbingPage() {
             countdownIntervalRef.current = null;
             countdownTimeoutRef.current = null;
             setCancelCountdown(0);
-            executeDubbingJob();
+            setDubbingDraft({
+                selectedFile,
+                selectedSource,
+                selectedTarget,
+                selectedVoiceMethod,
+                selectedFormat,
+                enhanceAudio,
+                voiceClone,
+                betaToken,
+            });
+            setIsRedirecting(true);
+            redirectTimeoutRef.current = window.setTimeout(() => router.push('/dubbing/edit'), 1100);
         }, 8000);
     };
     const uploadStatus = isSubmitting
@@ -556,6 +396,15 @@ export default function DubbingPage() {
                 handleSubmit();
             }}
         >
+            {isRedirecting && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-6 backdrop-blur-sm">
+                    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-6 text-center text-white shadow-2xl">
+                        <LoaderCircle className="mx-auto h-8 w-8 animate-spin text-indigo-300" />
+                        <p className="mt-4 text-lg font-semibold">Creating your project space</p>
+                        <p className="mt-2 text-sm text-slate-400">Redirecting to editor<span className="inline-block w-8 text-left animate-pulse">...</span></p>
+                    </div>
+                </div>
+            )}
             <input
                 id="dubbing-upload-input"
                 type="file"
@@ -627,10 +476,10 @@ export default function DubbingPage() {
                         </label>
                         <button
                             type="submit"
-                            disabled={isSubmitting || cancelCountdown > 0}
+                            disabled={isSubmitting || cancelCountdown > 0 || isRedirecting}
                             className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                            {isSubmitting ? 'Processing...' : cancelCountdown > 0 ? `Starts in ${cancelCountdown}s` : 'Start dubbing'}
+                            {isSubmitting ? 'Processing...' : cancelCountdown > 0 ? `Starts in ${cancelCountdown}s` : isRedirecting ? 'Opening editor...' : 'Start dubbing'}
                             <ArrowRight className="h-4 w-4" />
                         </button>
                     </div>
@@ -853,11 +702,11 @@ export default function DubbingPage() {
                         <div className="mt-6 flex flex-wrap items-center gap-3">
                             <button
                                 type="submit"
-                                disabled={isSubmitting || cancelCountdown > 0}
+                                disabled={isSubmitting || cancelCountdown > 0 || isRedirecting}
                                 className="btn-primary"
                             >
                                 <WandSparkles className="h-4 w-4" />
-                                {isSubmitting ? 'Processing...' : cancelCountdown > 0 ? `Starts in ${cancelCountdown}s` : 'Start dubbing workflow'}
+                                {isSubmitting ? 'Processing...' : cancelCountdown > 0 ? `Starts in ${cancelCountdown}s` : isRedirecting ? 'Opening editor...' : 'Start dubbing workflow'}
                             </button>
                             <p className="text-sm text-slate-500">The response comes back with live download links from FastAPI.</p>
                         </div>
