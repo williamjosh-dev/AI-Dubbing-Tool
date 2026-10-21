@@ -745,13 +745,24 @@ def generate_tts(
     job.status = "processing"
     job.error = None
     db.commit()
-    background_tasks.add_task(
-        regenerate_tts_job,
-        job_id,
-        payload.translatedSegments,
-        output_format,
-        normalize_language(payload.targetLanguage, "en"),
-    )
+    target_language = normalize_language(payload.targetLanguage, "en")
+    if os.getenv("MODAL_PIPELINE") == "1":
+        from modal_app import generate_edited_tts_container
+
+        generate_edited_tts_container.spawn(
+            job_id,
+            payload.translatedSegments,
+            target_language,
+            output_format,
+        )
+    else:
+        background_tasks.add_task(
+            regenerate_tts_job,
+            job_id,
+            payload.translatedSegments,
+            output_format,
+            target_language,
+        )
     return {"jobId": job_id, "status": "processing"}
 
 @app.get("/api/status/{job_id}")
@@ -760,12 +771,17 @@ def get_job_status(job_id: str, db: Session = Depends(get_db)) -> dict:
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
     translated_segments = []
-    segments_path = OUTPUT_DIR / f"{job_id}_segments.json"
-    if segments_path.exists():
+    segment_paths = [OUTPUT_DIR / f"{job_id}_segments.json"]
+    if os.getenv("MODAL_PIPELINE") == "1":
+        segment_paths.insert(0, Path("/root/shared_storage") / job_id / "translated_segments.json")
+    for segments_path in segment_paths:
+        if not segments_path.exists():
+            continue
         try:
             translated_segments = json.loads(segments_path.read_text(encoding="utf-8"))
+            break
         except (OSError, json.JSONDecodeError):
-            translated_segments = []
+            continue
     return {
         "jobId": job.job_id,
         "status": job.status,
@@ -779,7 +795,7 @@ def get_job_status(job_id: str, db: Session = Depends(get_db)) -> dict:
                 "translatedSegments": translated_segments,
                 "translatedText": " ".join(segment.get("translated", "") for segment in translated_segments),
             }
-            if job.status == "completed"
+            if job.status in {"completed", "awaiting_review"}
             else None
         ),
         "createdAt": job.created_at.isoformat(),

@@ -21,7 +21,7 @@ function buildMediaUrl(path) {
     return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
 }
 
-function startJobPolling(jobId, { onStatus, onComplete, onFailure }) {
+function startJobPolling(jobId, { onStatus, onReview, onComplete, onFailure }) {
     let isCancelled = false;
     let timeoutId;
 
@@ -38,6 +38,10 @@ function startJobPolling(jobId, { onStatus, onComplete, onFailure }) {
             }
             if (data.status === 'failed') {
                 onFailure(new Error(data.error || 'Dubbing processing failed on the backend.'));
+                return;
+            }
+            if (data.status === 'awaiting_review') {
+                onReview?.(data.result);
                 return;
             }
 
@@ -121,6 +125,12 @@ export default function DubbingEditorPage() {
             setJobId(savedJobId);
             stopPolling = startJobPolling(savedJobId, {
                 onStatus: (status) => setJobStatus(`Status: ${status}...`),
+                onReview: (reviewResult) => {
+                    setResult(reviewResult);
+                    setEditedSegments(reviewResult?.translatedSegments || []);
+                    setJobStatus('Your translation is ready for review.');
+                    setIsWorking(false);
+                },
                 onComplete: handleComplete,
                 onFailure: handleFailure,
             });

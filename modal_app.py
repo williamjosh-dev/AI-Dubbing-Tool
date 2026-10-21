@@ -1,4 +1,5 @@
 import gc
+import json
 import os
 import subprocess
 import sys
@@ -649,6 +650,88 @@ def assemble_and_finish_container(
     SHARED_VOLUME.commit()
     return {"audio_url": audio_url, "video_url": video_url, "download_url": public_url}
 
+
+@app.function(
+    image=cpu_image,
+    volumes={STORAGE_DIR: SHARED_VOLUME},
+    secrets=[modal.Secret.from_name("my-repo-secrets")],
+    timeout=1800,
+)
+def generate_edited_tts_container(
+    job_id: str,
+    translated_segments: list[dict],
+    target_language: str,
+    output_format: str,
+) -> dict:
+    if "/root" not in sys.path:
+        sys.path.insert(0, "/root")
+    from backend.db import BetaToken, Job, SessionLocal
+    from backend.storage import upload_public_file, upload_r2_file
+
+    SHARED_VOLUME.reload()
+    job_dir = Path(STORAGE_DIR) / job_id
+    source_candidates = list(job_dir.glob("input.*"))
+    if not source_candidates:
+        raise FileNotFoundError(f"Source media was not found for job {job_id}.")
+    source_path = source_candidates[0]
+    is_video = source_path.suffix.lower().lstrip(".") in {"mp4", "mov", "avi", "mkv", "webm"}
+
+    db = SessionLocal()
+    job = db.query(Job).filter(Job.job_id == job_id).first()
+    if not job:
+        db.close()
+        raise RuntimeError(f"Job not found: {job_id}")
+
+    try:
+        zonos_worker_instance = generate_zonos_speech_worker()
+        warmup_call = zonos_worker_instance.warmup.spawn(job_id)
+        warmup_call.get()
+
+        texts = []
+        output_paths = []
+        reference_audios = []
+        languages = []
+        default_reference = str(job_dir / "voice_reference.wav")
+        for index, segment in enumerate(translated_segments):
+            translated_text = str(segment.get("translated", "")).strip()
+            if not translated_text:
+                continue
+            speaker = str(segment.get("speaker", "default"))
+            speaker_reference = job_dir / f"voice_reference_{speaker}.wav"
+            texts.append(translated_text)
+            output_paths.append(str(job_dir / f"raw_seg_{index}.wav"))
+            reference_audios.append(str(speaker_reference if speaker_reference.exists() else default_reference))
+            languages.append(target_language)
+
+        if texts:
+            list(zonos_worker_instance.generate.map(texts, output_paths, reference_audios, languages))
+
+        (job_dir / "translated_segments.json").write_text(json.dumps(translated_segments), encoding="utf-8")
+        SHARED_VOLUME.commit()
+        result = assemble_and_finish_container.remote(
+            job_id, str(source_path), translated_segments, "", is_video, output_format
+        )
+        job.audio_url = result["audio_url"]
+        job.video_url = result["video_url"]
+        job.download_url = result["download_url"]
+        job.status = "completed"
+        db.commit()
+        settle_token = db.query(BetaToken).filter(BetaToken.active_job_id == job_id).with_for_update().first()
+        if settle_token:
+            settle_token.used_seconds += settle_token.reserved_seconds
+            settle_token.reserved_seconds = 0
+            settle_token.active_job_id = None
+            db.commit()
+        return {"audioUrl": job.audio_url, "videoUrl": job.video_url, "downloadUrl": job.download_url}
+    except Exception as exc:
+        db.rollback()
+        job.status = "failed"
+        job.error = str(exc)[:500]
+        db.commit()
+        raise
+    finally:
+        db.close()
+
 # -------------------------------------------------------------
 # STEP 4: Main Orchestrator Function
 # -------------------------------------------------------------
@@ -708,49 +791,10 @@ def run_modal_job(
         zonos_warmup_call.get()
 
         translated_segments = gpu_results["translated_segments"]
-        speaker_reference_audios = gpu_results["speaker_reference_audios"]
-
-        texts = []
-        output_paths = []
-        reference_audios = []
-        languages = []
-
-        for index, segment in enumerate(translated_segments):
-            translated_text = segment.get("translated", "").strip()
-
-            if not translated_text:
-                continue
-
-            texts.append(translated_text)
-            output_paths.append(
-                str(job_dir / f"raw_seg_{index}.wav")
-            )
-            reference_audios.append(
-                speaker_reference_audios.get(
-                    str(segment.get("speaker")),
-                    speaker_reference_audios["default"],
-                )
-            )
-            languages.append(target_language)
-
-        if texts:
-            print(
-                f"[{job_id}] Sending "
-                f"{len(texts)} segments to Zonos workers..."
-            )
-
-            # 🌟 FIX 3: Use the identical instance handle to map out the speech generation segments
-            list(
-                zonos_worker_instance.generate.map(
-                    texts,
-                    output_paths,
-                    reference_audios,
-                    languages,
-                )
-            )
-
-            print(f"[{job_id}] All Zonos generations completed successfully!")
-                
+        (job_dir / "translated_segments.json").write_text(
+            json.dumps(translated_segments),
+            encoding="utf-8",
+        )
         transcript_path = job_dir / f"{job_id}_transcript.txt"
         transcript_path.write_text(
             "\n".join(
@@ -761,27 +805,13 @@ def run_modal_job(
             encoding="utf-8",
         )
         SHARED_VOLUME.commit()
-
-        result = assemble_and_finish_container.remote(
-            job_id, source_path, translated_segments, "", is_video, output_format
-        )
-        job.audio_url = result["audio_url"]
-        job.video_url = result["video_url"]
-        job.download_url = result["download_url"]
         output_uploader = upload_r2_file if os.getenv("R2_BUCKET_NAME") else upload_public_file
         job.transcript_url = output_uploader(transcript_path, job_id, "transcript")
-        job.status = "completed"
+        job.status = "awaiting_review"
         db.commit()
-        settle_token = db.query(BetaToken).filter(BetaToken.active_job_id == job_id).with_for_update().first()
-        if settle_token:
-            settle_token.used_seconds += settle_token.reserved_seconds
-            settle_token.reserved_seconds = 0
-            settle_token.active_job_id = None
-            db.commit()
         return {
-            "audioUrl": job.audio_url,
-            "videoUrl": job.video_url,
-            "transcriptUrl": job.transcript_url,
+            "status": "awaiting_review",
+            "translatedSegments": translated_segments,
         }
     except Exception as exc:
         if "zonos_warmup_call" in locals():
