@@ -414,6 +414,17 @@ def process_gpu_pipeline(
     from backend.demcus_service import DemucsBackend
     from backend.module.transcribe import transcribe_audio_whisperx_full
     from backend.module.translate import translate_segments
+    from backend.db import Job, SessionLocal
+
+    def update_status(status: str) -> None:
+        status_db = SessionLocal()
+        try:
+            job = status_db.query(Job).filter(Job.job_id == job_id).first()
+            if job:
+                job.status = status
+                status_db.commit()
+        finally:
+            status_db.close()
 
  
     # ---- 1. Demucs separation ----
@@ -425,6 +436,7 @@ def process_gpu_pipeline(
     target_transcription_audio = audio_path
 
     if separate_stems:
+        update_status("separating_audio")
         print(f"[{job_id}] Demucs Separation")
 
         demucs_worker = DemucsBackend(
@@ -464,6 +476,7 @@ def process_gpu_pipeline(
 
 
     # ---- 2. WhisperX transcription ----
+    update_status("transcribing_audio")
     print(f"[{job_id}] WhisperX Transcription")
     segments = transcribe_audio_whisperx_full(
         target_transcription_audio,
@@ -482,6 +495,7 @@ def process_gpu_pipeline(
     torch.cuda.empty_cache()
 
     # ---- 3. Translation ----
+    update_status("translating_text")
     print(f"[{job_id}] Translation ({len(segments)} segments)")
     translated_segments = translate_segments(
         segments,
@@ -490,6 +504,7 @@ def process_gpu_pipeline(
     )
 
     # ---- 4. Voice Cloning references ----
+    update_status("preparing_voice")
     print(f"[{job_id}] Zonos Voice Cloning - Preparing speaker references")
     ref_source_path = (
         vocals_path
@@ -772,14 +787,20 @@ def run_modal_job(
         job.status = "processing"
         db.commit()
 
-        # 🌟 FIX 1: Instantiate the Modal Class handle once here
+        job.status = "starting_voice_worker"
+        db.commit()
+
+        # Start the voice worker while the source is being prepared and translated.
         zonos_worker_instance = generate_zonos_speech_worker()
 
-        # 🌟 FIX 2: Use the instance handle to spawn the warmup container
         zonos_warmup_call = zonos_worker_instance.warmup.spawn(job_id)
 
+        job.status = "extracting_audio"
+        db.commit()
         working_audio_path = extract_audio_container.remote(job_id, source_path)
-        
+
+        job.status = "transcribing_and_translating"
+        db.commit()
         gpu_results = process_gpu_pipeline.remote(
             working_audio_path,
             job_id,
@@ -790,6 +811,8 @@ def run_modal_job(
 
         zonos_warmup_call.get()
 
+        job.status = "ready_for_review"
+        db.commit()
         translated_segments = gpu_results["translated_segments"]
         (job_dir / "translated_segments.json").write_text(
             json.dumps(translated_segments),

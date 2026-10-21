@@ -71,11 +71,11 @@ const processingSteps = [
 function getProcessingStage(status, isComplete) {
     if (isComplete) return processingSteps.length;
     const normalizedStatus = status.toLowerCase();
-    if (normalizedStatus.includes('upload') || normalizedStatus.includes('prepar')) return 1;
-    if (normalizedStatus.includes('extract') || normalizedStatus.includes('audio')) return 2;
+    if (normalizedStatus.includes('upload') || normalizedStatus.includes('start')) return 1;
+    if (normalizedStatus.includes('extract') || normalizedStatus.includes('separat')) return 2;
     if (normalizedStatus.includes('transcrib') || normalizedStatus.includes('listen')) return 3;
     if (normalizedStatus.includes('translat')) return 4;
-    if (normalizedStatus.includes('synth') || normalizedStatus.includes('voice') || normalizedStatus.includes('speech')) return 5;
+    if (normalizedStatus.includes('prepar') || normalizedStatus.includes('voice') || normalizedStatus.includes('speech')) return 5;
     if (normalizedStatus.includes('assembl') || normalizedStatus.includes('render') || normalizedStatus.includes('finish')) return 6;
     return 1;
 }
@@ -93,6 +93,7 @@ export default function DubbingEditorPage() {
     const [jobStatus, setJobStatus] = useState('Preparing your editor...');
     const [result, setResult] = useState(null);
     const [editedSegments, setEditedSegments] = useState([]);
+    const [isReviewReady, setIsReviewReady] = useState(false);
     const [error, setError] = useState('');
     const [isWorking, setIsWorking] = useState(true);
     const [isGeneratingTts, setIsGeneratingTts] = useState(false);
@@ -106,6 +107,7 @@ export default function DubbingEditorPage() {
 
         const handleComplete = (jobResult) => {
             setResult(jobResult);
+            setIsReviewReady(false);
             setEditedSegments(jobResult?.translatedSegments || []);
             setJobStatus('Your dub is ready.');
             setIsWorking(false);
@@ -126,7 +128,8 @@ export default function DubbingEditorPage() {
             stopPolling = startJobPolling(savedJobId, {
                 onStatus: (status) => setJobStatus(`Status: ${status}...`),
                 onReview: (reviewResult) => {
-                    setResult(reviewResult);
+                    setResult(null);
+                    setIsReviewReady(true);
                     setEditedSegments(reviewResult?.translatedSegments || []);
                     setJobStatus('Your translation is ready for review.');
                     setIsWorking(false);
@@ -201,8 +204,8 @@ export default function DubbingEditorPage() {
     const audioUrl = buildMediaUrl(result?.audioUrl);
     const videoUrl = buildMediaUrl(result?.videoUrl);
     const transcriptUrl = buildMediaUrl(result?.transcriptUrl);
-    const currentStage = getProcessingStage(jobStatus, Boolean(result));
-    const progressPercent = result ? 100 : Math.max(8, Math.round((currentStage / processingSteps.length) * 100));
+    const currentStage = isReviewReady ? processingSteps.length : getProcessingStage(jobStatus, Boolean(result));
+    const progressPercent = result ? 100 : isReviewReady ? 90 : Math.max(8, Math.round((currentStage / processingSteps.length) * 100));
 
     const updateTranslatedSegment = (index, translated) => {
         setEditedSegments((segments) => segments.map((segment, segmentIndex) => (
@@ -215,6 +218,7 @@ export default function DubbingEditorPage() {
         setIsGeneratingTts(true);
         setError('');
         setResult(null);
+        setIsReviewReady(false);
         setJobStatus('Creating a new voice track from your edited text...');
         try {
             const response = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/generate-tts`, {
@@ -233,6 +237,7 @@ export default function DubbingEditorPage() {
                 onStatus: (status) => setJobStatus(`Updating your dubbed audio: ${status}...`),
                 onComplete: (jobResult) => {
                     setResult(jobResult);
+                    setIsReviewReady(false);
                     setEditedSegments(jobResult.translatedSegments || editedSegments);
                     setJobStatus('Your updated dub is ready.');
                     setIsGeneratingTts(false);
@@ -266,9 +271,9 @@ export default function DubbingEditorPage() {
                                 {draft ? `${draft.selectedSource.toUpperCase()} to ${draft.selectedTarget.toUpperCase()} · ${draft.selectedFormat.toUpperCase()}` : 'Live job workspace'}
                             </p>
                         </div>
-                        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold ${error ? 'bg-red-400/15 text-red-200' : result ? 'bg-emerald-400/15 text-emerald-200' : 'bg-indigo-400/15 text-indigo-200'}`}>
-                            {error ? <XCircle className="h-4 w-4" /> : result ? <CheckCircle2 className="h-4 w-4" /> : <LoaderCircle className="h-4 w-4 animate-spin" />}
-                            {error ? 'Needs attention' : result ? 'Complete' : 'Working'}
+                        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold ${error ? 'bg-red-400/15 text-red-200' : result || isReviewReady ? 'bg-emerald-400/15 text-emerald-200' : 'bg-indigo-400/15 text-indigo-200'}`}>
+                            {error ? <XCircle className="h-4 w-4" /> : result || isReviewReady ? <CheckCircle2 className="h-4 w-4" /> : <LoaderCircle className="h-4 w-4 animate-spin" />}
+                            {error ? 'Needs attention' : result ? 'Complete' : isReviewReady ? 'Review ready' : 'Working'}
                         </span>
                     </div>
                 </div>
@@ -281,7 +286,7 @@ export default function DubbingEditorPage() {
                         <div>
                             <h2 className="text-xl font-semibold">{jobStatus}</h2>
                             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-                                {error || (result ? 'Your generated files are ready to review.' : 'This editor is handling the upload, transcription, translation, and voice generation.')}
+                                {error || (result ? 'Your generated files are ready to preview and download.' : isReviewReady ? 'Review the translated lines, then generate the final voice track.' : 'This editor is handling the upload, transcription, translation, and voice generation.')}
                             </p>
                         </div>
                     </div>
@@ -374,11 +379,19 @@ export default function DubbingEditorPage() {
                     )}
 
                     {result && (
-                        <div className="mt-8 grid gap-3 sm:grid-cols-3">
+                        <section className="mt-8 rounded-2xl border border-emerald-300/20 bg-emerald-400/[0.06] p-5 sm:p-6">
+                            <div>
+                                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300">Final result</p>
+                                <h2 className="mt-2 text-lg font-semibold text-white">Preview your finished dub</h2>
+                            </div>
+                            {audioUrl && <audio className="mt-5 w-full" controls src={audioUrl} />}
+                            {videoUrl && <video className="mt-4 w-full rounded-xl border border-white/10" controls src={videoUrl} />}
+                            <div className="mt-5 grid gap-3 sm:grid-cols-3">
                             {audioUrl && <a href={audioUrl} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-indigo-50"><FileAudio2 className="h-5 w-5 text-indigo-600" /> Download audio <Download className="ml-auto h-4 w-4" /></a>}
                             {videoUrl && <a href={videoUrl} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-indigo-50"><FileVideo2 className="h-5 w-5 text-indigo-600" /> Download video <Download className="ml-auto h-4 w-4" /></a>}
                             {transcriptUrl && <a href={transcriptUrl} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-indigo-50"><Download className="h-5 w-5 text-indigo-600" /> Download transcript <Download className="ml-auto h-4 w-4" /></a>}
-                        </div>
+                            </div>
+                        </section>
                     )}
                 </div>
             </section>
