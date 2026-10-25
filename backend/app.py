@@ -747,13 +747,18 @@ def generate_tts(
     db.commit()
     target_language = normalize_language(payload.targetLanguage, "en")
     if os.getenv("MODAL_PIPELINE") == "1":
-        from modal_app import generate_edited_tts_container
+        from modal_app import run_modal_job
 
-        generate_edited_tts_container.spawn(
-            job_id,
-            payload.translatedSegments,
-            target_language,
-            output_format,
+        run_modal_job.spawn(
+            job_id=job_id,
+            source_path="",
+            is_video=False,
+            source_language="",
+            target_language=target_language,
+            output_format=output_format,
+            enhance_audio=False,
+            translated_segments=payload.translatedSegments,
+            job_name="edited-tts",
         )
     else:
         background_tasks.add_task(
