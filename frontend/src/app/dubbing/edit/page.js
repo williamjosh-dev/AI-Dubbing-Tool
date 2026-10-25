@@ -24,14 +24,35 @@ function buildMediaUrl(path) {
 function startJobPolling(jobId, { onStatus, onReview, onComplete, onFailure }) {
     let isCancelled = false;
     let timeoutId;
+    let consecutiveErrors = 0;
+
+    const scheduleNextCheck = () => {
+        timeoutId = window.setTimeout(checkStatus, 3000);
+    };
 
     const checkStatus = async () => {
         try {
             const response = await fetch(`${API_BASE_URL}/api/status/${jobId}`);
-            const data = await response.json();
-            if (!response.ok) throw new Error(formatError(data));
+            let data;
+            try {
+                data = await response.json();
+            } catch {
+                data = null;
+            }
             if (isCancelled) return;
 
+            if (!response.ok) {
+                consecutiveErrors += 1;
+                onStatus?.('Waiting for the backend...');
+                if (consecutiveErrors >= 5) {
+                    onFailure(new Error(formatError(data) || 'The backend did not respond.'));
+                    return;
+                }
+                scheduleNextCheck();
+                return;
+            }
+
+            consecutiveErrors = 0;
             if (data.status === 'completed') {
                 onComplete(data.result);
                 return;
@@ -46,9 +67,16 @@ function startJobPolling(jobId, { onStatus, onReview, onComplete, onFailure }) {
             }
 
             onStatus(data.status);
-            timeoutId = window.setTimeout(checkStatus, 3000);
+            scheduleNextCheck();
         } catch (error) {
-            if (!isCancelled) onFailure(error);
+            if (isCancelled) return;
+            consecutiveErrors += 1;
+            onStatus?.('Waiting for the backend...');
+            if (consecutiveErrors >= 5) {
+                onFailure(error);
+                return;
+            }
+            scheduleNextCheck();
         }
     };
 
@@ -71,6 +99,7 @@ const processingSteps = [
 function getProcessingStage(status, isComplete) {
     if (isComplete) return processingSteps.length;
     const normalizedStatus = status.toLowerCase();
+    if (normalizedStatus.includes('could not') || normalizedStatus.includes('failed')) return 0;
     if (normalizedStatus.includes('upload') || normalizedStatus.includes('start')) return 1;
     if (normalizedStatus.includes('extract') || normalizedStatus.includes('separat')) return 2;
     if (normalizedStatus.includes('transcrib') || normalizedStatus.includes('listen')) return 3;
