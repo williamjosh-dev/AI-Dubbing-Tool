@@ -123,6 +123,7 @@ l4_image = (
         "pytorch_lightning",
         "rich",
         "omegaconf",
+        "psycopg2-binary",
         extra_options="--timeout 120"
     )
     # Ensure NumPy stays pinned
