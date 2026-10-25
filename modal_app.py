@@ -69,12 +69,12 @@ l4_image = (
         "torchvision==0.19.0",
         index_url="https://download.pytorch.org/whl/cu121",
     )
-    # Core Transformers & Whisper stack
+    # Core Transformers & Whisper stack (FIXED: Explicitly restricting huggingface_hub version)
     .pip_install(
         "ctranslate2>=4.4.0",
         "faster-whisper>=1.0.3",
         "transformers>=4.40.0,<4.48.0",
-        "huggingface_hub",
+        "huggingface_hub>=0.24.0,<1.0.0",  # 👈 FIXED: Prevents version conflict with transformers
         "hf_transfer",
         extra_options="--timeout 120"
     )
@@ -136,13 +136,13 @@ l4_image = (
         "python -c 'import nltk; nltk.download(\"punkt\"); nltk.download(\"punkt_tab\")'"
     )
     
-    # Environment Variables
+    # Environment Variables (FIXED: Switched to modern high-performance download flags)
     .env(
         {
             "HF_HOME": f"{MODEL_CACHE_DIR}/huggingface",
             "TORCH_HOME": f"{MODEL_CACHE_DIR}/torch",
             "XDG_CACHE_HOME": f"{MODEL_CACHE_DIR}/cache",
-            "HF_HUB_ENABLE_HF_TRANSFER": "1",
+            "HF_XET_HIGH_PERFORMANCE": "1",  # 👈 FIXED: Modern flag replacing deprecated HF_TRANSFER
             "WHISPER_MODEL": "large-v3",
             "WHISPER_BATCH_SIZE": "4",
             "WHISPER_COMPUTE_TYPE": "float16",
