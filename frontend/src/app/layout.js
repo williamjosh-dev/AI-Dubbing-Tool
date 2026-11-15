@@ -4,8 +4,8 @@ import { MessageSquare } from 'lucide-react';
 import Sidebar from './components/sidebar';
 
 export const metadata = {
-  title: 'AI Dubbing Studio',
-  description: 'Route-based dubbing dashboard for uploads, jobs, and history.',
+  title: 'Voxa — Make every voice global',
+  description: 'Create natural-sounding dubs for your audio and video. Translate your story, synthesize a voice, and share it with the world.',
 };
 
 export default function RootLayout({ children }) {
