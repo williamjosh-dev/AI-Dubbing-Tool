@@ -31,7 +31,7 @@ export default function HomePage() {
   return (
     <main className="min-h-screen overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5 sm:px-8 lg:px-12">
-        <Link href="/" className="flex items-center gap-2.5" aria-label="Voxly home">
+        <Link href="/" className="flex items-center gap-2.5" aria-label="Voxa home">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent)] text-white"><Waves size={19} strokeWidth={2.4} /></span>
           <span className="text-lg font-semibold tracking-tight">voxa<span className="text-[var(--accent)]">.</span></span>
         </Link>
@@ -40,8 +40,8 @@ export default function HomePage() {
           <a href="#features" className="transition hover:text-[var(--foreground)]">Why Voxa</a>
         </nav>
         <div className="flex items-center gap-2 sm:gap-3">
-          <Link href="/dashboard" className="rounded-full px-3 py-2 text-sm font-medium text-[var(--foreground)] transition hover:bg-black/5 sm:px-4">Log in</Link>
-          <Link href="/dubbing" className="inline-flex items-center gap-2 rounded-full bg-[var(--foreground)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--accent)] sm:px-5">Get started <ArrowRight size={15} /></Link>
+          <Link href="/sign-in" className="rounded-full px-3 py-2 text-sm font-medium text-[var(--foreground)] transition hover:bg-black/5 sm:px-4">Log in</Link>
+          <Link href="/sign-up" className="inline-flex items-center gap-2 rounded-full bg-[var(--foreground)] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[var(--accent)] sm:px-5">Get started <ArrowRight size={15} /></Link>
         </div>
       </header>
 
@@ -53,7 +53,7 @@ export default function HomePage() {
           <h1 className="max-w-2xl text-[clamp(3.2rem,7vw,6.2rem)] font-semibold leading-[0.98] tracking-[-0.065em]">Make every voice <span className="font-serif font-normal italic text-[var(--accent)]">global.</span></h1>
           <p className="mt-7 max-w-lg text-base leading-7 text-[var(--muted-foreground)] sm:text-lg sm:leading-8">Turn your audio and video into natural-sounding dubs. Reach new audiences without losing the voice behind your story.</p>
           <div className="mt-8 flex flex-wrap items-center gap-4">
-            <Link href="/dubbing" className="inline-flex items-center gap-2.5 rounded-full bg-[var(--accent)] px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:-translate-y-0.5 hover:bg-violet-700">Start dubbing <ArrowRight size={16} /></Link>
+            <Link href="/sign-up" className="inline-flex items-center gap-2.5 rounded-full bg-[var(--accent)] px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:-translate-y-0.5 hover:bg-violet-700">Start dubbing <ArrowRight size={16} /></Link>
             <a href="#workflow" className="inline-flex items-center gap-2 rounded-full px-4 py-3 text-sm font-medium text-[var(--foreground)] transition hover:bg-white">See how it works <ArrowDownRight size={15} /></a>
           </div>
           <div className="mt-11 flex items-center gap-3 text-xs text-[var(--muted-foreground)]"><div className="flex -space-x-2"><span className="h-7 w-7 rounded-full border-2 border-[var(--background)] bg-amber-200"/><span className="h-7 w-7 rounded-full border-2 border-[var(--background)] bg-cyan-200"/><span className="h-7 w-7 rounded-full border-2 border-[var(--background)] bg-violet-200"/></div><span>Made for the stories worth sharing</span></div>
@@ -96,7 +96,7 @@ export default function HomePage() {
         <div className="grid w-full gap-3 sm:grid-cols-3 md:max-w-xl"><div className="rounded-2xl border border-[var(--border)] bg-white/70 p-4"><Upload size={17} className="mb-5 text-[var(--accent)]"/><p className="text-sm font-semibold">Simple setup</p><p className="mt-1 text-xs leading-5 text-[var(--muted-foreground)]">Start with the media you already have.</p></div><div className="rounded-2xl border border-[var(--border)] bg-white/70 p-4"><Languages size={17} className="mb-5 text-[var(--accent)]"/><p className="text-sm font-semibold">Language choices</p><p className="mt-1 text-xs leading-5 text-[var(--muted-foreground)]">Make content for more listeners.</p></div><div className="rounded-2xl border border-[var(--border)] bg-white/70 p-4"><Headphones size={17} className="mb-5 text-[var(--accent)]"/><p className="text-sm font-semibold">Review your dub</p><p className="mt-1 text-xs leading-5 text-[var(--muted-foreground)]">Listen, refine, and export.</p></div></div>
       </section>
 
-      <footer className="border-t border-[var(--border)] bg-white/45"><div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-7 text-xs text-[var(--muted-foreground)] sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-12"><Link href="/" className="flex items-center gap-2 font-semibold text-[var(--foreground)]"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--accent)] text-white"><Waves size={14}/></span>voxa<span className="text-[var(--accent)]">.</span></Link><span>Make your story heard in more languages.</span><Link href="/dubbing" className="font-medium text-[var(--foreground)] hover:text-[var(--accent)]">Open the studio <ArrowRight size={13} className="ml-1 inline"/></Link></div></footer>
+      <footer className="border-t border-[var(--border)] bg-white/45"><div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-7 text-xs text-[var(--muted-foreground)] sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-12"><Link href="/" className="flex items-center gap-2 font-semibold text-[var(--foreground)]"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--accent)] text-white"><Waves size={14}/></span>voxa<span className="text-[var(--accent)]">.</span></Link><span>Make your story heard in more languages.</span><Link href="/sign-in" className="font-medium text-[var(--foreground)] hover:text-[var(--accent)]">Open the studio <ArrowRight size={13} className="ml-1 inline"/></Link></div></footer>
     </main>
   );
 }

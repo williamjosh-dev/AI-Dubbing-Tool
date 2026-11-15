@@ -142,4 +142,12 @@
     @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1
       text-xs font-medium ring-1 ring-inset;
   }
+
+  .auth-input {
+    @apply w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-950 shadow-sm transition placeholder:text-slate-400;
+  }
+
+  .auth-input:focus-visible {
+    @apply border-violet-600 outline-none ring-4 ring-violet-500/15;
+  }
 }
