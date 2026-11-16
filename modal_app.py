@@ -69,21 +69,21 @@ l4_image = (
         "torchvision==0.19.0",
         index_url="https://download.pytorch.org/whl/cu121",
     )
-    # Core Transformers & Whisper stack (FIXED: Explicitly restricting huggingface_hub version)
+    # Core Transformers & Whisper stack
     .pip_install(
         "ctranslate2>=4.4.0",
         "faster-whisper>=1.0.3",
         "transformers>=4.40.0,<4.48.0",
-        "huggingface_hub>=0.24.0,<1.0.0",  # 👈 FIXED: Prevents version conflict with transformers
+        "huggingface_hub>=0.24.0,<1.0.0",  
         "hf_transfer",
         extra_options="--timeout 120"
     )
-    # Audio Processing & Pyannote Ecosystem
+        # Audio Processing & Pyannote Ecosystem (Locked to NumPy 1.x compatible versions)
     .pip_install(
-        "pyannote.core",
-        "pyannote.database",
-        "pyannote.metrics",
-        "pyannote.pipeline",
+        "pyannote.core==5.0.0",
+        "pyannote.database==5.1.0",
+        "pyannote.metrics==3.2.1",
+        "pyannote.pipeline==3.0.1",
         "torch-audiomentations",
         "julius",
         "asteroid-filterbanks",
@@ -99,7 +99,7 @@ l4_image = (
         "scipy",
         extra_options="--timeout 120"
     )
-    # Utilities & Translation
+    # Utilities & Translation (Aligning pandas/datasets for compatibility)
     .pip_install(
         "semver",
         "matplotlib",
@@ -110,7 +110,8 @@ l4_image = (
         "safetensors",
         "sentencepiece",
         "tqdm",
-        "pandas>=2.2.0",
+        "pandas<2.2.0",
+        "datasets<3.0.0",
         "nltk>=3.9.1",
         "groq",
         "protobuf>=5.0.0",
@@ -129,20 +130,23 @@ l4_image = (
     # Ensure NumPy stays pinned
     .pip_install("numpy>=1.26.0,<2.0.0")
 
-    # Install Pyannote Audio and WhisperX directly
+        # 🛑 FORCE MODAL TO PURGE BROKEN VERSIONS HERE 🛑
     .run_commands(
+        # Force reinstall your pinned NumPy version alongside your core transformers stack
+        "pip install --force-reinstall 'numpy>=1.26.0,<2.0.0' 'huggingface_hub>=0.24.0,<1.0.0' 'transformers>=4.40.0,<4.48.0'",
         "pip install pyannote.audio==3.1.1 --no-deps",
         "pip install git+https://github.com/m-bain/whisperX.git --no-deps",
         "python -c 'import nltk; nltk.download(\"punkt\"); nltk.download(\"punkt_tab\")'"
     )
+
     
-    # Environment Variables (FIXED: Switched to modern high-performance download flags)
+    # Environment Variables
     .env(
         {
             "HF_HOME": f"{MODEL_CACHE_DIR}/huggingface",
             "TORCH_HOME": f"{MODEL_CACHE_DIR}/torch",
             "XDG_CACHE_HOME": f"{MODEL_CACHE_DIR}/cache",
-            "HF_XET_HIGH_PERFORMANCE": "1",  # 👈 FIXED: Modern flag replacing deprecated HF_TRANSFER
+            "HF_XET_HIGH_PERFORMANCE": "1",  
             "WHISPER_MODEL": "large-v3",
             "WHISPER_BATCH_SIZE": "4",
             "WHISPER_COMPUTE_TYPE": "float16",
@@ -698,6 +702,8 @@ def run_modal_job(
     SHARED_VOLUME.reload()
 
     job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / ".zonos-ready").unlink(missing_ok=True)
+    (job_dir / ".zonos-failed").unlink(missing_ok=True)
     
     db = SessionLocal()
     job = db.query(Job).filter(Job.job_id == job_id).first()
@@ -718,8 +724,6 @@ def run_modal_job(
             is_video = source_candidates[0].suffix.lower().lstrip(".") in {
                 "mp4", "mov", "avi", "mkv", "webm"
             }
-
-            (job_dir / ".zonos-failed").unlink(missing_ok=True)
 
         job.status = "starting_voice_worker"
         db.commit()
@@ -789,13 +793,18 @@ def run_modal_job(
                 "downloadUrl": job.download_url,
             }
 
+                # -------------------------------------------------------------
+        # STANDARD INFERENCE PIPELINE BRANCH (when is_edit is False)
+        # -------------------------------------------------------------
         job.status = "extracting_audio"
         db.commit()
         working_audio_path = extract_audio_container.remote(job_id, source_path)
 
         job.status = "transcribing_and_translating"
         db.commit()
-        gpu_results = process_gpu_pipeline.remote(
+        
+        # 1. Start the transcription process without blocking the Zonos warm-up.
+        gpu_pipeline_call = process_gpu_pipeline.spawn(
             working_audio_path,
             job_id,
             source_language,
@@ -803,6 +812,10 @@ def run_modal_job(
             separate_stems=enhance_audio,
         )
 
+        # Both calls run concurrently: the pipeline writes .zonos-ready,
+        # while the Zonos worker waits for that marker. Await the pipeline
+        # first so a pipeline failure reaches the exception handler promptly.
+        gpu_results = gpu_pipeline_call.get()
         zonos_warmup_call.get()
 
         job.status = "ready_for_review"

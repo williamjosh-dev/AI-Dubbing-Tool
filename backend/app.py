@@ -527,7 +527,7 @@ def dub_audio(
 
     modal_pipeline = os.getenv("MODAL_PIPELINE") == "1"
     if modal_pipeline:
-        from modal_app import run_modal_job
+        from modal_app import SHARED_VOLUME, run_modal_job
 
         # 1. Define shared storage path where Modal workers can access it
         SHARED_STORAGE_DIR = "/root/shared_storage"
@@ -537,6 +537,7 @@ def dub_audio(
         # 2. Save file to the shared storage path
         shared_source_path = os.path.join(job_shared_dir, f"input.{original_ext}")
         shutil.copyfile(source_path, shared_source_path)
+        SHARED_VOLUME.commit()
 
         # 3. Sanitize strings to avoid null bytes
         clean_job_id = str(job_id).replace("\x00", "").strip()
@@ -635,12 +636,13 @@ def dub_from_storage(
 
     modal_pipeline = os.getenv("MODAL_PIPELINE") == "1"
     if modal_pipeline:
-        from modal_app import run_modal_job
+        from modal_app import SHARED_VOLUME, run_modal_job
 
         job_shared_dir = os.path.join("/root/shared_storage", job_id)
         os.makedirs(job_shared_dir, exist_ok=True)
         shared_source_path = os.path.join(job_shared_dir, f"input.{original_ext}")
         shutil.copyfile(source_path, shared_source_path)
+        SHARED_VOLUME.commit()
         try:
             run_modal_job.spawn(
                 job_id=job_id,
