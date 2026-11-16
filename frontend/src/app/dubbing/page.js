@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { setDubbingDraft } from './project-store';
+import { setDubbingDraft, upsertDashboardJob } from './project-store';
 import {
     AlertCircle,
     ArrowRight,
@@ -354,7 +354,9 @@ export default function DubbingPage() {
             countdownIntervalRef.current = null;
             countdownTimeoutRef.current = null;
             setCancelCountdown(0);
+            const clientJobId = `draft-${Date.now()}`;
             setDubbingDraft({
+                clientJobId,
                 selectedFile,
                 selectedSource,
                 selectedTarget,
@@ -363,6 +365,13 @@ export default function DubbingPage() {
                 enhanceAudio,
                 voiceClone,
                 betaToken,
+            });
+            upsertDashboardJob({
+                id: clientJobId,
+                name: selectedFile.name,
+                status: 'Queued',
+                lang: `${selectedSource.toUpperCase()} → ${selectedTarget.toUpperCase()}`,
+                progress: 5,
             });
             setIsRedirecting(true);
             redirectTimeoutRef.current = window.setTimeout(() => router.push('/dubbing/edit'), 1100);

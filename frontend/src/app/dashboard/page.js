@@ -1,8 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Upload, Clock, Cpu, FileDown, Search, MoreVertical } from 'lucide-react';
+import { getDashboardJobs, upsertDashboardJob } from '../dubbing/project-store';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
 const pipelineCards = [
   {
@@ -63,21 +66,44 @@ export default function DashboardPage() {
   const [query, setQuery] = useState('');
   const [jobs, setJobs] = useState([]);
 
+  useEffect(() => {
+    const loadJobs = () => setJobs(getDashboardJobs());
+    loadJobs();
+
+    const refreshStatuses = async () => {
+      const savedJobs = getDashboardJobs();
+      await Promise.all(savedJobs.filter((job) => job.jobId).map(async (job) => {
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/status/${job.jobId}`);
+          if (!response.ok) return;
+          const data = await response.json();
+          const status = data.status === 'completed'
+            ? 'Completed'
+            : data.status === 'awaiting_review'
+              ? 'Awaiting review'
+              : data.status === 'failed'
+                ? 'Failed'
+                : data.status.replaceAll('_', ' ');
+          upsertDashboardJob({
+            id: job.id,
+            status,
+            progress: data.status === 'completed' ? 100 : data.status === 'awaiting_review' ? 90 : job.progress,
+          });
+        } catch {
+          // Keep the last known status when the backend is temporarily unavailable.
+        }
+      }));
+      loadJobs();
+    };
+
+    const intervalId = window.setInterval(refreshStatuses, 5000);
+    refreshStatuses();
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   const filteredJobs = jobs.filter((job) =>
     job.name.toLowerCase().includes(query.toLowerCase())
   );
-
-  const handleNewUpload = () => {
-    const newJob = {
-      id: Date.now(),
-      name: `New upload ${jobs.length + 1}`,
-      status: 'Queued',
-      lang: 'EN → ES',
-      progress: 8,
-    };
-
-    setJobs((currentJobs) => [newJob, ...currentJobs]);
-  };
 
   return (
     <section className="mx-auto max-w-6xl px-6 py-10 space-y-8">
@@ -89,14 +115,13 @@ export default function DashboardPage() {
         </p>
 
         <div className="mt-6 flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={handleNewUpload}
+          <Link
+            href="/dubbing"
             className="inline-flex items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-slate-100"
           >
             <Upload className="h-4 w-4" />
             New Upload
-          </button>
+          </Link>
           <Link
             href="/history"
             className="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20"
@@ -184,7 +209,7 @@ export default function DashboardPage() {
               </div>
 
               <span
-                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${statusStyles[job.status]}`}
+                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${statusStyles[job.status] || 'bg-slate-100 text-slate-700 ring-slate-600/20'}`}
               >
                 <Clock className="h-3 w-3" />
                 {job.status}

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, CheckCircle2, Download, FileAudio2, FileVideo2, LoaderCircle, Sparkles, XCircle } from 'lucide-react';
-import { clearDubbingDraft, getDubbingDraft } from '../project-store';
+import { clearDubbingDraft, getDubbingDraft, upsertDashboardJob } from '../project-store';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 const ACTIVE_JOB_STORAGE_KEY = 'ai-dubbing-active-job';
@@ -134,19 +134,35 @@ export default function DubbingEditorPage() {
 
         if (savedDraft) setDraft(savedDraft);
 
-        const handleComplete = (jobResult) => {
+        const handleComplete = (jobResult, completedJobId = jobId) => {
             setResult(jobResult);
             setIsReviewReady(false);
             setEditedSegments(jobResult?.translatedSegments || []);
             setJobStatus('Your dub is ready.');
             setIsWorking(false);
+            if (savedDraft?.clientJobId) {
+                upsertDashboardJob({
+                    id: savedDraft.clientJobId,
+                    jobId: completedJobId,
+                    status: 'Completed',
+                    progress: 100,
+                });
+            }
             window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
             clearDubbingDraft();
         };
-        const handleFailure = (jobError) => {
+        const handleFailure = (jobError, failedJobId = jobId) => {
             setError(jobError instanceof Error ? jobError.message : 'Dubbing processing failed.');
             setJobStatus('The job could not be completed.');
             setIsWorking(false);
+            if (savedDraft?.clientJobId) {
+                upsertDashboardJob({
+                    id: savedDraft.clientJobId,
+                    jobId: failedJobId,
+                    status: 'Failed',
+                    progress: 0,
+                });
+            }
             window.localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
         };
 
@@ -162,9 +178,17 @@ export default function DubbingEditorPage() {
                     setEditedSegments(reviewResult?.translatedSegments || []);
                     setJobStatus('Your translation is ready for review.');
                     setIsWorking(false);
+                    if (savedDraft?.clientJobId) {
+                        upsertDashboardJob({
+                            id: savedDraft.clientJobId,
+                            jobId: savedJobId,
+                            status: 'Awaiting review',
+                            progress: 90,
+                        });
+                    }
                 },
-                onComplete: handleComplete,
-                onFailure: handleFailure,
+                onComplete: (jobResult) => handleComplete(jobResult, savedJobId),
+                onFailure: (jobError) => handleFailure(jobError, savedJobId),
             });
         } else if (savedDraft?.selectedFile) {
             const runJob = async () => {
@@ -211,11 +235,29 @@ export default function DubbingEditorPage() {
 
                     window.localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify({ jobId: data.jobId }));
                     setJobId(data.jobId);
+                    if (savedDraft.clientJobId) {
+                        upsertDashboardJob({
+                            id: savedDraft.clientJobId,
+                            jobId: data.jobId,
+                            status: 'Transcribing',
+                            progress: 20,
+                        });
+                    }
                     setJobStatus('Your dub is processing...');
                     stopPolling = startJobPolling(data.jobId, {
-                        onStatus: (status) => setJobStatus(`Status: ${status}...`),
-                        onComplete: handleComplete,
-                        onFailure: handleFailure,
+                        onStatus: (status) => {
+                            setJobStatus(`Status: ${status}...`);
+                            if (savedDraft.clientJobId) {
+                                upsertDashboardJob({
+                                    id: savedDraft.clientJobId,
+                                    jobId: data.jobId,
+                                    status: status.replaceAll('_', ' '),
+                                    progress: 35,
+                                });
+                            }
+                        },
+                        onComplete: (jobResult) => handleComplete(jobResult, data.jobId),
+                        onFailure: (jobError) => handleFailure(jobError, data.jobId),
                     });
                 } catch (jobError) {
                     handleFailure(jobError);
