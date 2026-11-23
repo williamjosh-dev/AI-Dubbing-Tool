@@ -366,6 +366,8 @@ class generate_zonos_speech_worker:
     ):
         import os
 
+        SHARED_VOLUME.reload()
+
         print(f"[ZONOS] Reference: {reference_audio}")
         print(f"[ZONOS] Exists: {os.path.exists(reference_audio)}")
 
@@ -381,6 +383,8 @@ class generate_zonos_speech_worker:
             reference_audio=reference_audio,
             language=language,
         )
+
+        SHARED_VOLUME.commit()
 
         print(f"[ZONOS] Generated: {output_path}")
         print(f"[ZONOS] Output exists: {os.path.exists(output_path)}")
