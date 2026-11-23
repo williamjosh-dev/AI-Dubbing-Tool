@@ -10,6 +10,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1147.0",
     "@aws-sdk/s3-request-presigner": "^3.1147.0",
+    "@neon/auth": "^0.8.2",
     "lucide-react": "^1.28.0",
     "next": "latest",
     "react": "latest",
