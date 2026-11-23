@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from backend.db import BetaToken, Feedback, Job, SessionLocal, get_db, init_db
 from backend.pipeline import AudioTranslationPipeline
 from backend.storage import download_r2_file, upload_public_file, upload_r2_file
+from modal_app import SHARED_VOLUME, run_modal_job
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
@@ -173,7 +174,6 @@ def replace_audio_in_video(video_path: Path, audio_path: Path, output_path: Path
         str(output_path),
     ]
     run_ffmpeg(command)
-
 
 @app.get("/api/health")
 def health_check() -> dict:
@@ -526,6 +526,7 @@ def dub_audio(
         # 2. Save file to the shared storage path
         shared_source_path = os.path.join(job_shared_dir, f"input.{original_ext}")
         shutil.copyfile(source_path, shared_source_path)
+        SHARED_VOLUME.commit()
 
         # 3. Sanitize strings to avoid null bytes
         clean_job_id = str(job_id).replace("\x00", "").strip()
@@ -630,6 +631,8 @@ def dub_from_storage(
         os.makedirs(job_shared_dir, exist_ok=True)
         shared_source_path = os.path.join(job_shared_dir, f"input.{original_ext}")
         shutil.copyfile(source_path, shared_source_path)
+        SHARED_VOLUME.commit()
+        
         try:
             run_modal_job.spawn(
                 job_id=job_id,
